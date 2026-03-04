@@ -34,11 +34,6 @@ app.use('/', userRoutes);
   try {
     await db.sequelize.authenticate();
     console.log('✅ Подключение к БД установлено');
-    
-    // ВНИМАНИЕ: { force: true } удалит все таблицы и данные.
-    // Для первого запуска используйте force: true, затем переключите на { alter: true } или просто sync()
-    await db.sequelize.sync({ alter: true }); 
-    console.log('✅ Таблицы синхронизированы');
 
   } catch (err) {
     console.error('❌ Ошибка подключения к БД:', err);
