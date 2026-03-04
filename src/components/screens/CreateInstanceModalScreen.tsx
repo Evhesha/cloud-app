@@ -1,82 +1,144 @@
-import { Link } from "react-router-dom"
+import { useMemo, useState } from 'react'
+import { NavLink, useNavigate } from 'react-router-dom'
+import { useCloud } from '../../context/CloudContext'
 
 export function CreateInstanceModalScreen() {
+  const navigate = useNavigate()
+  const {
+    activeTenant,
+    activeTenantId,
+    setActiveTenantId,
+    tenants,
+    flavors,
+    images,
+    canDeployForTenant,
+    createVm,
+  } = useCloud()
+
+  const [instanceName, setInstanceName] = useState('')
+  const [selectedFlavorId, setSelectedFlavorId] = useState(flavors[0]?.id ?? '')
+  const [selectedImageId, setSelectedImageId] = useState(images[0]?.id ?? '')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const selectedFlavor = useMemo(
+    () => flavors.find((flavor) => flavor.id === selectedFlavorId) ?? flavors[0],
+    [flavors, selectedFlavorId],
+  )
+
+  const guard = canDeployForTenant(activeTenantId, selectedFlavorId)
+  const deployBlocked = !guard.ok || !instanceName.trim() || submitting
+
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (deployBlocked || !selectedFlavor || !selectedImageId) {
+      return
+    }
+
+    setSubmitting(true)
+    setError(null)
+
+    try {
+      await createVm({
+        tenantId: activeTenantId,
+        name: instanceName.trim(),
+        flavorId: selectedFlavor.id,
+        imageId: selectedImageId,
+      })
+
+      navigate('/customer-dashboard')
+    } catch (createError) {
+      setError(createError instanceof Error ? createError.message : 'Unable to deploy instance.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   return (
-    <section className="modal-screen">
-      <div className="modal-backdrop" />
-      <div className="instance-modal">
-        <header>
+    <section className="mts-page">
+      <main className="mts-main">
+        <header className="page-head">
           <div>
-            <h2>Create New Instance</h2>
-            <p>Configure and deploy a new cloud instance to your project.</p>
+            <p className="mts-kicker">Create Instance</p>
+            <h2>Provision New Virtual Machine</h2>
           </div>
-          <Link to="/customer-dashboard">
-          <button type="button">Close</button>
-          </Link>
+          <NavLink to="/customer-dashboard" className="btn-secondary-pill">
+            Cancel
+          </NavLink>
         </header>
 
-        <div className="modal-content">
-          <label>
-            Instance Name
-            <input type="text" placeholder="production-api-server" />
-          </label>
+        <form className="panel-flat deploy-form" onSubmit={submit}>
+          <div className="form-grid two">
+            <label>
+              Tenant
+              <select value={activeTenantId} onChange={(event) => setActiveTenantId(event.target.value)}>
+                {tenants.map((tenant) => (
+                  <option key={tenant.id} value={tenant.id}>
+                    {tenant.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              Instance Name
+              <input
+                type="text"
+                value={instanceName}
+                onChange={(event) => setInstanceName(event.target.value)}
+                placeholder="mts-edge-api-01"
+              />
+            </label>
+          </div>
 
           <div>
-            <h3>Select Operating System Image</h3>
-            <div className="selection-grid three">
-              <button type="button" className="tile active">
-                <strong>Ubuntu 22.04</strong>
-                <span>LTS Build</span>
-              </button>
-              <button type="button" className="tile">
-                <strong>CentOS Stream</strong>
-                <span>v9.0 Stable</span>
-              </button>
-              <button type="button" className="tile">
-                <strong>Windows Server</strong>
-                <span>2022 Datacenter</span>
-              </button>
+            <h3>Select Image</h3>
+            <div className="choice-grid">
+              {images.map((image) => (
+                <button
+                  key={image.id}
+                  type="button"
+                  className={`choice-card ${selectedImageId === image.id ? 'active' : ''}`}
+                  onClick={() => setSelectedImageId(image.id)}
+                >
+                  {image.name}
+                </button>
+              ))}
             </div>
           </div>
 
           <div>
-            <h3>Instance Flavor</h3>
-            <div className="selection-list">
-              <button type="button" className="row-tile active">
-                <strong>Small Instance</strong>
-                <span>2 vCPU • 4GB RAM • 80GB SSD</span>
-                <b>$15 / mo</b>
-              </button>
-              <button type="button" className="row-tile">
-                <strong>Medium Instance</strong>
-                <span>4 vCPU • 8GB RAM • 160GB SSD</span>
-                <b>$40 / mo</b>
-              </button>
-              <button type="button" className="row-tile">
-                <strong>Large Instance</strong>
-                <span>8 vCPU • 16GB RAM • 320GB SSD</span>
-                <b>$85 / mo</b>
-              </button>
+            <h3>Select Flavor</h3>
+            <div className="choice-grid">
+              {flavors.map((flavor) => (
+                <button
+                  key={flavor.id}
+                  type="button"
+                  className={`choice-card ${selectedFlavorId === flavor.id ? 'active' : ''}`}
+                  onClick={() => setSelectedFlavorId(flavor.id)}
+                >
+                  <strong>{flavor.name}</strong>
+                  <span>
+                    {flavor.vcpu} vCPU • {flavor.ramGb}GB RAM • {flavor.storageGb}GB SSD
+                  </span>
+                  <small>${flavor.monthlyPrice}/mo</small>
+                </button>
+              ))}
             </div>
           </div>
-        </div>
 
-        <footer>
-          <small>
-            Estimated cost: <b>$15.00/month</b>
-          </small>
-          <div>
-              <Link to="/customer-dashboard">
-            <button type="button" className="ghost-btn">
-              Cancel
-            </button>
-            </Link>
-            <button type="button" className="primary-btn">
-              Deploy Instance
+          <div className="deploy-footer">
+            <p>
+              Quota for {activeTenant.name}: {activeTenant.quota.vcpu} vCPU, {activeTenant.quota.ramGb}GB RAM
+            </p>
+            {guard.reason && <p className="guard-warning">{guard.reason}</p>}
+            {error && <p className="guard-warning">{error}</p>}
+            <button type="submit" className="btn-primary-pill" disabled={deployBlocked}>
+              {submitting ? 'Deploying...' : 'Deploy Instance'}
             </button>
           </div>
-        </footer>
-      </div>
+        </form>
+      </main>
     </section>
   )
 }

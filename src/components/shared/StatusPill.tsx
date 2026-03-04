@@ -1,14 +1,17 @@
+import type { VmStatus } from '../../types/cloud'
+
 type StatusPillProps = {
-  status: 'RUNNING' | 'STOPPED' | 'MAINTENANCE' | 'SYSTEMS ONLINE'
+  status: VmStatus
+}
+
+const statusMap: Record<VmStatus, { label: string; className: string }> = {
+  RUNNING: { label: 'RUNNING', className: 'status-running' },
+  PROVISIONING: { label: 'PROVISIONING', className: 'status-provisioning' },
+  STOPPED: { label: 'STOPPED', className: 'status-stopped' },
+  ERROR: { label: 'ERROR', className: 'status-error' },
 }
 
 export function StatusPill({ status }: StatusPillProps) {
-  const tone =
-    status === 'RUNNING' || status === 'SYSTEMS ONLINE'
-      ? 'pill-green'
-      : status === 'MAINTENANCE'
-        ? 'pill-amber'
-        : 'pill-red'
-
-  return <span className={`status-pill ${tone}`}>{status}</span>
+  const view = statusMap[status]
+  return <span className={`status-pill ${view.className}`}>{view.label}</span>
 }

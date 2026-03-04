@@ -1,206 +1,142 @@
-import { MetricCard } from '../shared/MetricCard'
+import { NavLink } from 'react-router-dom'
 import { StatusPill } from '../shared/StatusPill'
-import { Link } from "react-router-dom"
+import { useCloud } from '../../context/CloudContext'
+import { useAuth } from '../../context/AuthContext'
 
-// Определяем тип для статусов
-type InstanceStatus = "RUNNING" | "STOPPED" | "MAINTENANCE" | "SYSTEMS ONLINE";
-
-// Создаем интерфейс для Instance, используя созданный тип
-interface Instance {
-  id: string;
-  name: string;
-  status: InstanceStatus; // Используем конкретный тип вместо string
-  vcpu: number;
-  ram: number;
-  ip: string;
+function clampPercent(value: number) {
+  return Math.max(0, Math.min(100, value))
 }
-
-const tenant = {
-  name: 'Acme Systems',
-  project: 'Production',
-  vpc: 'prod-vpc',
-  quota: {
-    cpu: 64,
-    ram: 128,
-    storage: 2000,
-    instances: 10,
-  },
-  usage: {
-    cpu: 48,
-    ram: 102,
-    storage: 1200,
-    instances: 3,
-  },
-}
-
-// Явно указываем тип для instances
-const instances: Instance[] = [
-  {
-    id: 'vm-101',
-    name: 'web-prod-01',
-    status: 'RUNNING', // TypeScript теперь понимает, что это допустимое значение
-    vcpu: 4,
-    ram: 16,
-    ip: '10.10.1.14',
-  },
-  {
-    id: 'vm-102',
-    name: 'billing-api',
-    status: 'RUNNING',
-    vcpu: 2,
-    ram: 8,
-    ip: '10.10.1.18',
-  },
-  {
-    id: 'vm-103',
-    name: 'analytics-worker',
-    status: 'STOPPED',
-    vcpu: 8,
-    ram: 32,
-    ip: '10.10.1.22',
-  },
-]
 
 export function CustomerDashboardScreen() {
-  const cpuPercent = (tenant.usage.cpu / tenant.quota.cpu) * 100
-  const ramPercent = (tenant.usage.ram / tenant.quota.ram) * 100
-  const storagePercent =
-    (tenant.usage.storage / tenant.quota.storage) * 100
+  const { logout } = useAuth()
+  const { activeTenant, activeTenantId, setActiveTenantId, tenants, vms, getTenantUsage } = useCloud()
+  const tenantVms = vms.filter((vm) => vm.tenantId === activeTenantId)
+  const usage = getTenantUsage(activeTenantId)
+
+  const vcpuPercent = clampPercent((usage.vcpu / activeTenant.quota.vcpu) * 100)
+  const ramPercent = clampPercent((usage.ramGb / activeTenant.quota.ramGb) * 100)
 
   return (
-    <section className="dashboard-screen">
-      <aside className="side-menu">
-        <div className="brand-block">
-          <span className="brand-mark" />
+    <section className="mts-page">
+      <main className="mts-main">
+        <header className="page-head">
           <div>
-            <strong>CloudPlatform</strong>
-            <small>Tenant Panel</small>
-          </div>
-        </div>
-
-        <nav>
-          <a className="active">Dashboard</a>
-          <a>Instances</a>
-          <a>Networks</a>
-          <a>Volumes</a>
-        </nav>
-
-        <div className="tenant-info-box">
-          <p><strong>Tenant:</strong> {tenant.name}</p>
-          <p><strong>Project:</strong> {tenant.project}</p>
-          <p><strong>VPC:</strong> {tenant.vpc}</p>
-        </div>
-      </aside>
-
-      <main className="dashboard-main">
-        <header className="panel-header">
-          <div>
+            <p className="mts-kicker">Customer Dashboard</p>
             <h2>Resource Overview</h2>
-            <small>Allocated resources within your tenant quota</small>
+          </div>
+          <div className="page-actions">
+            <NavLink to="/create-instance" className="btn-primary-pill">
+              New Instance
+            </NavLink>
+            <button type="button" className="btn-secondary-pill" onClick={() => void logout()}>
+              Logout
+            </button>
           </div>
         </header>
 
-        <section>
-          <div className="section-head">
-            <h3>Quota Usage</h3>
+        <section className="stat-bar-panel">
+          <div className="tenant-select-wrap">
+            <label htmlFor="tenant-select">Tenant</label>
+            <select
+              id="tenant-select"
+              value={activeTenantId}
+              onChange={(event) => setActiveTenantId(event.target.value)}
+            >
+              {tenants.map((tenant) => (
+                <option key={tenant.id} value={tenant.id}>
+                  {tenant.name}
+                </option>
+              ))}
+            </select>
           </div>
 
-          <div className="card-grid three">
-            <MetricCard
-              title="vCPU"
-              value={`${tenant.usage.cpu} / ${tenant.quota.cpu}`}
-              meta="Allocated cores"
-              progress={cpuPercent}
-              tone="blue"
-            />
+          <article>
+            <div className="stat-head">
+              <strong>vCPU Allocation</strong>
+              <span>
+                {usage.vcpu} / {activeTenant.quota.vcpu}
+              </span>
+            </div>
+            <div className="stat-track">
+              <div className="stat-fill" style={{ width: `${vcpuPercent}%` }} />
+            </div>
+          </article>
 
-            <MetricCard
-              title="RAM (GB)"
-              value={`${tenant.usage.ram} / ${tenant.quota.ram}`}
-              meta="Allocated memory"
-              progress={ramPercent}
-              tone="purple"
-            />
+          <article>
+            <div className="stat-head">
+              <strong>RAM Allocation</strong>
+              <span>
+                {usage.ramGb}GB / {activeTenant.quota.ramGb}GB
+              </span>
+            </div>
+            <div className="stat-track">
+              <div className="stat-fill" style={{ width: `${ramPercent}%` }} />
+            </div>
+          </article>
 
-            <MetricCard
-              title="Storage (GB)"
-              value={`${tenant.usage.storage} / ${tenant.quota.storage}`}
-              meta="Block storage usage"
-              progress={storagePercent}
-              tone="amber"
-            />
-          </div>
+          <article>
+            <div className="stat-head">
+              <strong>Instances</strong>
+              <span>
+                {usage.instances} / {activeTenant.quota.instances}
+              </span>
+            </div>
+            <div className="stat-track">
+              <div
+                className="stat-fill"
+                style={{ width: `${clampPercent((usage.instances / activeTenant.quota.instances) * 100)}%` }}
+              />
+            </div>
+          </article>
         </section>
 
-        <section>
-          <div className="section-head">
+        <section className="panel-flat">
+          <div className="panel-head-inline">
             <div>
-              <h3>Virtual Machines</h3>
-              <small>
-                Isolated compute resources inside {tenant.vpc}
-              </small>
+              <h3>Instances</h3>
+              <p>Virtual resources inside {activeTenant.name}</p>
             </div>
-
-            <Link to="/create-instance">
-              <button type="button" className="primary-btn">
-                Create Instance
-              </button>
-            </Link>
           </div>
 
-          <div className="table-wrap">
-            <table>
+          <div className="table-shell">
+            <table className="data-table">
               <thead>
                 <tr>
                   <th>Name</th>
                   <th>Status</th>
                   <th>Configuration</th>
-                  <th>Private IP</th>
+                  <th>OS</th>
+                  <th>IP</th>
                   <th>Actions</th>
                 </tr>
               </thead>
-
               <tbody>
-                {instances.map((vm) => (
+                {tenantVms.map((vm) => (
                   <tr key={vm.id}>
                     <td>
                       <strong>{vm.name}</strong>
-                      <br />
-                      <small style={{ color: '#666' }}>{vm.id}</small>
+                      <small>{vm.id}</small>
                     </td>
-
                     <td>
                       <StatusPill status={vm.status} />
                     </td>
-
                     <td>
-                      {vm.vcpu} vCPU / {vm.ram}GB RAM
+                      {vm.vcpu} vCPU / {vm.ramGb}GB
                     </td>
-
+                    <td>{vm.osImage}</td>
                     <td className="mono">{vm.ip}</td>
-
                     <td>
-                      <button 
-                        type="button" 
-                        className="action-btn"
-                        onClick={() => console.log('Start', vm.id)}
-                      >
-                        Start
-                      </button>
-                      <button 
-                        type="button" 
-                        className="action-btn"
-                        onClick={() => console.log('Stop', vm.id)}
-                      >
-                        Stop
-                      </button>
-                      <button 
-                        type="button" 
-                        className="action-btn"
-                        onClick={() => console.log('Reboot', vm.id)}
-                      >
-                        Reboot
-                      </button>
+                      <div className="action-group">
+                        <button type="button" aria-label="Start">
+                          ▶
+                        </button>
+                        <button type="button" aria-label="Stop">
+                          ■
+                        </button>
+                        <button type="button" aria-label="Restart">
+                          ↻
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
