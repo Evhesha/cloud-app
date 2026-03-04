@@ -1,72 +1,94 @@
 import { MetricCard } from '../shared/MetricCard'
 import { StatusPill } from '../shared/StatusPill'
-import type { NavItem, Stat, TableRow } from '../shared/types'
+import { Link } from "react-router-dom"
 
-const menu: NavItem[] = [
-  { id: 'dashboard', label: 'Dashboard', icon: '▦' },
-  { id: 'instances', label: 'Instances', icon: '◉' },
-  { id: 'networks', label: 'Networks', icon: '◎' },
-  { id: 'volumes', label: 'Volumes', icon: '◌' },
-  { id: 'billing', label: 'Billing', icon: '$' },
-]
+// Определяем тип для статусов
+type InstanceStatus = "RUNNING" | "STOPPED" | "MAINTENANCE" | "SYSTEMS ONLINE";
 
-const stats: Stat[] = [
-  { label: 'CPU Usage', value: '75%', meta: '48 of 64 Cores Allocated', progress: 75, tone: 'blue' },
-  { label: 'RAM Allocation', value: '80%', meta: '102GB of 128GB Used', progress: 80, tone: 'purple' },
-  { label: 'Storage Capacity', value: '60%', meta: '1.2TB of 2.0TB Used', progress: 60, tone: 'amber' },
-]
+// Создаем интерфейс для Instance, используя созданный тип
+interface Instance {
+  id: string;
+  name: string;
+  status: InstanceStatus; // Используем конкретный тип вместо string
+  vcpu: number;
+  ram: number;
+  ip: string;
+}
 
-const rows: TableRow[] = [
+const tenant = {
+  name: 'Acme Systems',
+  project: 'Production',
+  vpc: 'prod-vpc',
+  quota: {
+    cpu: 64,
+    ram: 128,
+    storage: 2000,
+    instances: 10,
+  },
+  usage: {
+    cpu: 48,
+    ram: 102,
+    storage: 1200,
+    instances: 3,
+  },
+}
+
+// Явно указываем тип для instances
+const instances: Instance[] = [
   {
-    name: 'web-server-prod-01',
-    id: 'i-0294819284',
-    status: 'RUNNING',
-    config: '4 vCPU / 16GB RAM',
-    ip: '192.168.1.104',
+    id: 'vm-101',
+    name: 'web-prod-01',
+    status: 'RUNNING', // TypeScript теперь понимает, что это допустимое значение
+    vcpu: 4,
+    ram: 16,
+    ip: '10.10.1.14',
   },
   {
-    name: 'billing-api-02',
-    id: 'i-5621029182',
+    id: 'vm-102',
+    name: 'billing-api',
     status: 'RUNNING',
-    config: '2 vCPU / 8GB RAM',
-    ip: '192.168.1.118',
+    vcpu: 2,
+    ram: 8,
+    ip: '10.10.1.18',
   },
   {
-    name: 'analytics-worker-03',
-    id: 'i-9847210211',
-    status: 'MAINTENANCE',
-    config: '8 vCPU / 32GB RAM',
-    ip: '192.168.1.123',
+    id: 'vm-103',
+    name: 'analytics-worker',
+    status: 'STOPPED',
+    vcpu: 8,
+    ram: 32,
+    ip: '10.10.1.22',
   },
 ]
 
 export function CustomerDashboardScreen() {
+  const cpuPercent = (tenant.usage.cpu / tenant.quota.cpu) * 100
+  const ramPercent = (tenant.usage.ram / tenant.quota.ram) * 100
+  const storagePercent =
+    (tenant.usage.storage / tenant.quota.storage) * 100
+
   return (
     <section className="dashboard-screen">
       <aside className="side-menu">
         <div className="brand-block">
           <span className="brand-mark" />
           <div>
-            <strong>CloudAdmin</strong>
-            <small>Enterprise IaaS</small>
+            <strong>CloudPlatform</strong>
+            <small>Tenant Panel</small>
           </div>
         </div>
 
         <nav>
-          {menu.map((item) => (
-            <a key={item.id} href="#" className={item.id === 'dashboard' ? 'active' : ''}>
-              <span>{item.icon}</span>
-              {item.label}
-            </a>
-          ))}
+          <a className="active">Dashboard</a>
+          <a>Instances</a>
+          <a>Networks</a>
+          <a>Volumes</a>
         </nav>
 
-        <div className="usage-box">
-          <p>Usage limit</p>
-          <div className="meter-track">
-            <div className="meter-fill blue" style={{ width: '75%' }} />
-          </div>
-          <small>75% of your total credits used</small>
+        <div className="tenant-info-box">
+          <p><strong>Tenant:</strong> {tenant.name}</p>
+          <p><strong>Project:</strong> {tenant.project}</p>
+          <p><strong>VPC:</strong> {tenant.vpc}</p>
         </div>
       </aside>
 
@@ -74,70 +96,111 @@ export function CustomerDashboardScreen() {
         <header className="panel-header">
           <div>
             <h2>Resource Overview</h2>
-            <StatusPill status="SYSTEMS ONLINE" />
-          </div>
-          <div className="profile-mini">
-            <strong>Admin Account</strong>
-            <small>Global Admin</small>
+            <small>Allocated resources within your tenant quota</small>
           </div>
         </header>
 
         <section>
           <div className="section-head">
-            <h3>Resource Quotas</h3>
-            <button type="button">View Detailed Stats</button>
+            <h3>Quota Usage</h3>
           </div>
+
           <div className="card-grid three">
-            {stats.map((item) => (
-              <MetricCard
-                key={item.label}
-                title={item.label}
-                value={item.value}
-                meta={item.meta}
-                progress={item.progress}
-                tone={item.tone}
-              />
-            ))}
+            <MetricCard
+              title="vCPU"
+              value={`${tenant.usage.cpu} / ${tenant.quota.cpu}`}
+              meta="Allocated cores"
+              progress={cpuPercent}
+              tone="blue"
+            />
+
+            <MetricCard
+              title="RAM (GB)"
+              value={`${tenant.usage.ram} / ${tenant.quota.ram}`}
+              meta="Allocated memory"
+              progress={ramPercent}
+              tone="purple"
+            />
+
+            <MetricCard
+              title="Storage (GB)"
+              value={`${tenant.usage.storage} / ${tenant.quota.storage}`}
+              meta="Block storage usage"
+              progress={storagePercent}
+              tone="amber"
+            />
           </div>
         </section>
 
         <section>
           <div className="section-head">
             <div>
-              <h3>Active Virtual Instances</h3>
-              <small>Real-time status of your running virtual machines</small>
+              <h3>Virtual Machines</h3>
+              <small>
+                Isolated compute resources inside {tenant.vpc}
+              </small>
             </div>
-            <button type="button" className="primary-btn">
-              New Instance
-            </button>
+
+            <Link to="/create-instance">
+              <button type="button" className="primary-btn">
+                Create Instance
+              </button>
+            </Link>
           </div>
 
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>Instance Name</th>
+                  <th>Name</th>
                   <th>Status</th>
                   <th>Configuration</th>
-                  <th>IP Address</th>
+                  <th>Private IP</th>
                   <th>Actions</th>
                 </tr>
               </thead>
+
               <tbody>
-                {rows.map((row) => (
-                  <tr key={row.id}>
+                {instances.map((vm) => (
+                  <tr key={vm.id}>
                     <td>
-                      <strong>{row.name}</strong>
-                      <small>{row.id}</small>
+                      <strong>{vm.name}</strong>
+                      <br />
+                      <small style={{ color: '#666' }}>{vm.id}</small>
                     </td>
+
                     <td>
-                      <StatusPill status={row.status} />
+                      <StatusPill status={vm.status} />
                     </td>
-                    <td>{row.config}</td>
-                    <td className="mono">{row.ip}</td>
+
                     <td>
-                      <button type="button">Power</button>
-                      <button type="button">Reboot</button>
+                      {vm.vcpu} vCPU / {vm.ram}GB RAM
+                    </td>
+
+                    <td className="mono">{vm.ip}</td>
+
+                    <td>
+                      <button 
+                        type="button" 
+                        className="action-btn"
+                        onClick={() => console.log('Start', vm.id)}
+                      >
+                        Start
+                      </button>
+                      <button 
+                        type="button" 
+                        className="action-btn"
+                        onClick={() => console.log('Stop', vm.id)}
+                      >
+                        Stop
+                      </button>
+                      <button 
+                        type="button" 
+                        className="action-btn"
+                        onClick={() => console.log('Reboot', vm.id)}
+                      >
+                        Reboot
+                      </button>
                     </td>
                   </tr>
                 ))}

@@ -36,52 +36,11 @@ button {
 }
 
 .app-shell {
-  display: grid;
-  grid-template-columns: 280px 1fr;
   min-height: 100vh;
 }
 
-.screen-switcher {
-  padding: 28px;
-  border-right: 1px solid #dbe2f0;
-  background: #f8fafc;
-}
-
-.screen-switcher h1 {
-  margin: 0;
-  font-size: 24px;
-}
-
-.screen-switcher p {
-  margin: 8px 0 20px;
-  color: #64748b;
-  font-size: 14px;
-}
-
-.switcher-list {
-  display: grid;
-  gap: 10px;
-}
-
-.switcher-list button {
-  text-align: left;
-  padding: 12px;
-  border-radius: 10px;
-  border: 1px solid #dbe2f0;
-  background: #fff;
-  color: #334155;
-  font-weight: 600;
-}
-
-.switcher-list button.active {
-  border-color: #1d4ed8;
-  background: #dbeafe;
-  color: #1d4ed8;
-}
-
 .preview-area {
-  padding: 20px;
-  overflow: auto;
+  min-height: 100vh;
 }
 
 .top-nav {
@@ -152,14 +111,12 @@ button {
 }
 
 .auth-screen {
-  border: 1px solid #dbe2f0;
-  border-radius: 16px;
-  overflow: hidden;
+  min-height: 100vh;
   background: linear-gradient(130deg, #f8fafc, #e2e8f0 60%, #cbd5e1);
 }
 
 .auth-body {
-  min-height: calc(100vh - 180px);
+  min-height: calc(100vh - 68px);
   display: grid;
   place-items: center;
   padding: 32px;
@@ -243,13 +200,10 @@ button {
 }
 
 .dashboard-screen {
-  border: 1px solid #dbe2f0;
-  border-radius: 16px;
-  overflow: hidden;
   background: #f8fafc;
   display: grid;
   grid-template-columns: 250px 1fr;
-  min-height: 760px;
+  min-height: 100vh;
 }
 
 .side-menu {
@@ -515,6 +469,7 @@ td button {
 .admin-screen {
   display: grid;
   gap: 12px;
+  min-height: 100vh;
 }
 
 .admin-body {
@@ -641,9 +596,7 @@ td button {
 
 .modal-screen {
   position: relative;
-  border: 1px solid #dbe2f0;
-  border-radius: 16px;
-  min-height: 760px;
+  min-height: 100vh;
   overflow: hidden;
   background: #0f172a;
   display: grid;
@@ -776,17 +729,8 @@ td button {
 }
 
 @media (max-width: 1200px) {
-  .app-shell {
-    grid-template-columns: 1fr;
-  }
-
-  .screen-switcher {
-    border-right: 0;
-    border-bottom: 1px solid #dbe2f0;
-  }
-
-  .switcher-list {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .preview-area {
+    min-height: auto;
   }
 }
 

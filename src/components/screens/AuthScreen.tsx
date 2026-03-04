@@ -1,55 +1,110 @@
+import { useState } from 'react'
+
 export function AuthScreen() {
+  const [mode, setMode] = useState<'login' | 'register'>('login')
+
   return (
     <section className="auth-screen">
       <header className="top-nav">
         <div className="brand">
           <span className="brand-mark" />
-          <strong>CloudPlatform</strong>
+          <strong>CloudPlatform IaaS</strong>
         </div>
-        <nav>
-          <a href="#">Solutions</a>
-          <a href="#">Pricing</a>
-          <a href="#">Documentation</a>
-          <button type="button">Support</button>
-        </nav>
       </header>
 
       <div className="auth-body">
         <div className="auth-card">
-          <h1>Welcome back</h1>
-          <p>Enterprise-grade infrastructure management</p>
+          <h1>
+            {mode === 'login'
+              ? 'Sign in to your Cloud Account'
+              : 'Create Tenant Account'}
+          </h1>
 
-          <div className="switch-row" role="tablist" aria-label="Role switch">
-            <button type="button" className="active">
-              Customer
+          <p>
+            {mode === 'login'
+              ? 'Access your virtual infrastructure'
+              : 'Start managing your cloud resources'}
+          </p>
+
+          <div className="switch-row">
+            <button
+              type="button"
+              className={mode === 'login' ? 'active' : ''}
+              onClick={() => setMode('login')}
+            >
+              Sign In
             </button>
-            <button type="button">Admin</button>
+            <button
+              type="button"
+              className={mode === 'register' ? 'active' : ''}
+              onClick={() => setMode('register')}
+            >
+              Register
+            </button>
           </div>
 
           <form className="auth-form">
+            
+
             <label>
               Email Address
-              <input type="email" placeholder="name@company.com" />
+              <input type="email" placeholder="name@company.com" required />
             </label>
+
             <label>
               Password
-              <input type="password" placeholder="••••••••" />
+              <input type="password" placeholder="••••••••" required />
             </label>
+
+            {mode === 'register' && (
+              <div>
+              <label>
+                Confirm Password
+                <input type="password" placeholder="••••••••" required />
+              </label>
+              <label>
+              Name
+              <input type="text" placeholder="John Doe" required />
+            </label>
+              </div>
+            )}
+
             <button type="submit" className="primary-btn">
-              Sign In to Dashboard
+              {mode === 'login' ? 'Sign In' : 'Create Account'}
             </button>
           </form>
 
-          <button type="button" className="ghost-btn">
-            Continue with SSO
-          </button>
-        </div>
+          {mode === 'login' && (
+            <>
+            
+              <p className="auth-footer-note">
+                Don’t have an account?{' '}
+                <button
+                  type="button"
+                  className="link-btn"
+                  onClick={() => setMode('register')}
+                >
+                  Register
+                </button>
+              </p>
+            </>
+          )}
 
-        <footer className="auth-footer">
-          <a href="#">Privacy Policy</a>
-          <a href="#">Terms of Service</a>
-          <a href="#">Contact</a>
-        </footer>
+          {mode === 'register' && (
+            <p className="auth-footer-note">
+              Already have an account?{' '}
+              <button
+                type="button"
+                className="link-btn"
+                onClick={() => setMode('login')}
+              >
+                Sign In
+              </button>
+              
+            </p>
+            
+          )}
+        </div>
       </div>
     </section>
   )

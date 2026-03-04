@@ -1,3 +1,5 @@
+import { Link } from "react-router-dom"
+
 export function CreateInstanceModalScreen() {
   return (
     <section className="modal-screen">
@@ -8,7 +10,9 @@ export function CreateInstanceModalScreen() {
             <h2>Create New Instance</h2>
             <p>Configure and deploy a new cloud instance to your project.</p>
           </div>
+          <Link to="/customer-dashboard">
           <button type="button">Close</button>
+          </Link>
         </header>
 
         <div className="modal-content">
@@ -62,9 +66,11 @@ export function CreateInstanceModalScreen() {
             Estimated cost: <b>$15.00/month</b>
           </small>
           <div>
+              <Link to="/customer-dashboard">
             <button type="button" className="ghost-btn">
               Cancel
             </button>
+            </Link>
             <button type="button" className="primary-btn">
               Deploy Instance
             </button>
