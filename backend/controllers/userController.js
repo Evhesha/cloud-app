@@ -1,15 +1,10 @@
-const { User, Role } = require('../models');
+const { User } = require('../models');
 
 // Получить профиль текущего пользователя
 exports.getProfile = async (req, res) => {
   try {
     const user = await User.findByPk(req.user.id, {
-      attributes: ['id', 'name', 'email', 'role_id', 'createdAt'],
-      include: [{
-        model: Role,
-        as: 'role',
-        attributes: ['name']
-      }]
+      attributes: ['id', 'name', 'email', 'role_id']
     });
     if (!user) {
       return res.status(404).json({ error: 'Пользователь не найден' });
@@ -25,12 +20,7 @@ exports.getProfile = async (req, res) => {
 exports.getAllUsers = async (req, res) => {
   try {
     const users = await User.findAll({
-      attributes: ['id', 'name', 'email', 'role_id', 'createdAt'],
-      include: [{
-        model: Role,
-        as: 'role',
-        attributes: ['name']
-      }],
+      attributes: ['id', 'name', 'email', 'role_id'],
       order: [['id', 'ASC']],
     });
     res.json(users);
@@ -45,12 +35,7 @@ exports.getUserById = async (req, res) => {
   const { id } = req.params;
   try {
     const user = await User.findByPk(id, {
-      attributes: ['id', 'name', 'email', 'role_id', 'createdAt'],
-      include: [{
-        model: Role,
-        as: 'role',
-        attributes: ['name']
-      }]
+      attributes: ['id', 'name', 'email', 'role_id']
     });
     if (!user) {
       return res.status(404).json({ error: 'Пользователь не найден' });

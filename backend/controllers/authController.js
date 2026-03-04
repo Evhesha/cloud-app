@@ -37,7 +37,7 @@ exports.register = async (req, res) => {
   }
 };
 
-// Вход
+// Вход в аккаунт
 exports.login = async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
@@ -81,7 +81,7 @@ exports.login = async (req, res) => {
   }
 };
 
-// Выход
+// Выход из аккаунта
 exports.logout = (req, res) => {
   res.clearCookie('token');
   res.json({ message: 'Выход выполнен' });

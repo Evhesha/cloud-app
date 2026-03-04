@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 
+// Аутентификация
 const authenticateToken = (req, res, next) => {
   const token = req.cookies.token;
 
@@ -11,12 +12,12 @@ const authenticateToken = (req, res, next) => {
     if (err) {
       return res.status(403).json({ error: 'Недействительный токен' });
     }
-    req.user = user; // содержит id, email, role_id
+    req.user = user;
     next();
   });
 };
 
-// Опционально: middleware для проверки роли администратора
+// Проверка роли администратора
 const checkAdmin = (req, res, next) => {
   if (req.user.role_id !== 2) {
     return res.status(403).json({ error: 'Требуются права администратора' });
