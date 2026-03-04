@@ -11,6 +11,32 @@ module.exports = (sequelize) => {
       type: DataTypes.STRING(255),
       allowNull: false,
     },
+    image: {
+      type: DataTypes.STRING(100),
+      allowNull: false,
+      validate: {
+        isIn: [[
+          'flashspys/nginx-static',
+          'polygnome/lighttpd',
+          'nginx:alpine',
+          'httpd:alpine',
+          'caddy:alpine'
+        ]],
+      },
+    },
+    container_id: {
+      type: DataTypes.STRING(255),
+      allowNull: true,
+      unique: true,
+    },
+    port: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      validate: {
+        min: 1,
+        max: 65535,
+      },
+    },
     ip_address: {
       type: DataTypes.STRING(39),
       validate: {

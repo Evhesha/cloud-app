@@ -12,6 +12,7 @@ name
 
 tenants:
 id
+quota_id
 is_active
 
 quotas:
@@ -24,9 +25,21 @@ vm_limit
 virtual_machines:
 id
 tenant_id
+network_id
 name
-id_address
+image
+container
+port
+ip_address
 cpu
 ram
 disk
 status
+
+networks:
+id
+tenant_id
+name
+cidr
+vlan
+gateway
