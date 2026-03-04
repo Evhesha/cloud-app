@@ -3,6 +3,7 @@ export type UserRole = 'customer' | 'admin'
 export type VmStatus = 'PROVISIONING' | 'RUNNING' | 'STOPPED' | 'ERROR'
 
 export type NodeStatus = 'healthy' | 'warning' | 'critical' | 'maintenance'
+export type NodeType = 'compute' | 'storage' | 'network'
 
 export type CloudQuota = {
   vcpu: number
@@ -14,6 +15,7 @@ export type CloudQuota = {
 export type Tenant = {
   id: string
   name: string
+  ownerEmail: string
   segment: 'enterprise' | 'mid-market' | 'startup'
   quota: CloudQuota
 }
@@ -39,8 +41,11 @@ export type TenantUsage = {
 
 export type InfrastructureNode = {
   id: string
-  zone: string
+  zone: 'ru-central-1a' | 'ru-central-1b' | 'ru-central-1c'
+  type: NodeType
   status: NodeStatus
+  cpuLoad: number
+  ramLoad: number
 }
 
 export type VmFlavor = {
@@ -62,4 +67,11 @@ export type CreateVmPayload = {
   name: string
   flavorId: string
   imageId: string
+}
+
+export type CreateTenantPayload = {
+  name: string
+  ownerEmail: string
+  segment: 'startup' | 'corporate'
+  quota: CloudQuota
 }

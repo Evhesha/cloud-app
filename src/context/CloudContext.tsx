@@ -9,8 +9,9 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { infrastructureNodes, initialVms, tenants, vmFlavors, vmImages } from '../data/mockCloud'
+import { infrastructureNodes, initialVms, tenants as initialTenants, vmFlavors, vmImages } from '../data/mockCloud'
 import type {
+  CreateTenantPayload,
   CreateVmPayload,
   InfrastructureNode,
   Tenant,
@@ -32,6 +33,8 @@ type CloudContextValue = {
   getTenantUsage: (tenantId: string) => TenantUsage
   canDeployForTenant: (tenantId: string, flavorId: string) => { ok: boolean; reason: string | null }
   createVm: (payload: CreateVmPayload) => Promise<{ vmId: string }>
+  deleteVm: (vmId: string) => void
+  createTenant: (payload: CreateTenantPayload) => Promise<{ tenantId: string }>
 }
 
 const CloudContext = createContext<CloudContextValue | null>(null)
@@ -56,7 +59,8 @@ function sumUsage(machines: VirtualMachine[]): TenantUsage {
 
 export function CloudProvider({ children }: { children: ReactNode }) {
   const [vms, setVms] = useState<VirtualMachine[]>(initialVms)
-  const [activeTenantId, setActiveTenantId] = useState<string>(tenants[0].id)
+  const [tenants, setTenants] = useState<Tenant[]>(initialTenants)
+  const [activeTenantId, setActiveTenantId] = useState<string>(initialTenants[0].id)
   const timersRef = useRef<number[]>([])
 
   const getTenantUsage = useCallback(
@@ -109,47 +113,67 @@ export function CloudProvider({ children }: { children: ReactNode }) {
 
       return { ok: true, reason: null }
     },
-    [getTenantUsage],
+    [getTenantUsage, tenants],
   )
 
-  const createVm = useCallback(async (payload: CreateVmPayload) => {
-    const flavor = vmFlavors.find((item) => item.id === payload.flavorId)
-    const image = vmImages.find((item) => item.id === payload.imageId)
+  const createVm = useCallback(
+    async (payload: CreateVmPayload) => {
+      const flavor = vmFlavors.find((item) => item.id === payload.flavorId)
+      const image = vmImages.find((item) => item.id === payload.imageId)
 
-    if (!flavor || !image) {
-      throw new Error('Unable to create VM with selected flavor/image.')
-    }
+      if (!flavor || !image) {
+        throw new Error('Unable to create VM with selected flavor/image.')
+      }
 
-    const validation = canDeployForTenant(payload.tenantId, payload.flavorId)
-    if (!validation.ok) {
-      throw new Error(validation.reason ?? 'Deploy is blocked by resource guard.')
-    }
+      const validation = canDeployForTenant(payload.tenantId, payload.flavorId)
+      if (!validation.ok) {
+        throw new Error(validation.reason ?? 'Deploy is blocked by resource guard.')
+      }
 
-    const nextId = `vm-${Date.now()}`
-    const provisioningVm: VirtualMachine = {
-      id: nextId,
-      tenantId: payload.tenantId,
+      const nextId = `vm-${Date.now()}`
+      const provisioningVm: VirtualMachine = {
+        id: nextId,
+        tenantId: payload.tenantId,
+        name: payload.name,
+        status: 'PROVISIONING',
+        vcpu: flavor.vcpu,
+        ramGb: flavor.ramGb,
+        storageGb: flavor.storageGb,
+        osImage: image.name,
+        ip: buildIp(),
+      }
+
+      setVms((prev) => [provisioningVm, ...prev])
+
+      const timerId = window.setTimeout(() => {
+        setVms((prev) => prev.map((vm) => (vm.id === nextId ? { ...vm, status: 'RUNNING' } : vm)))
+      }, 3000)
+
+      timersRef.current.push(timerId)
+
+      return { vmId: nextId }
+    },
+    [canDeployForTenant],
+  )
+
+  const createTenant = useCallback(async (payload: CreateTenantPayload) => {
+    const tenantId = `tenant-${payload.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || Date.now().toString()}`
+
+    const nextTenant: Tenant = {
+      id: tenantId,
       name: payload.name,
-      status: 'PROVISIONING',
-      vcpu: flavor.vcpu,
-      ramGb: flavor.ramGb,
-      storageGb: flavor.storageGb,
-      osImage: image.name,
-      ip: buildIp(),
+      ownerEmail: payload.ownerEmail,
+      segment: payload.segment === 'startup' ? 'startup' : 'enterprise',
+      quota: payload.quota,
     }
 
-    setVms((prev) => [provisioningVm, ...prev])
+    setTenants((prev) => [nextTenant, ...prev])
+    return { tenantId }
+  }, [])
 
-    const timerId = window.setTimeout(() => {
-      setVms((prev) =>
-        prev.map((vm) => (vm.id === nextId ? { ...vm, status: 'RUNNING' } : vm)),
-      )
-    }, 3000)
-
-    timersRef.current.push(timerId)
-
-    return { vmId: nextId }
-  }, [canDeployForTenant])
+  const deleteVm = useCallback((vmId: string) => {
+    setVms((prev) => prev.filter((vm) => vm.id !== vmId))
+  }, [])
 
   useEffect(
     () => () => {
@@ -159,10 +183,7 @@ export function CloudProvider({ children }: { children: ReactNode }) {
     [],
   )
 
-  const activeTenant = useMemo(
-    () => tenants.find((item) => item.id === activeTenantId) ?? tenants[0],
-    [activeTenantId],
-  )
+  const activeTenant = useMemo(() => tenants.find((item) => item.id === activeTenantId) ?? tenants[0], [activeTenantId, tenants])
 
   const value = useMemo<CloudContextValue>(
     () => ({
@@ -177,8 +198,10 @@ export function CloudProvider({ children }: { children: ReactNode }) {
       getTenantUsage,
       canDeployForTenant,
       createVm,
+      deleteVm,
+      createTenant,
     }),
-    [activeTenant, activeTenantId, canDeployForTenant, createVm, getTenantUsage, vms],
+    [activeTenant, activeTenantId, canDeployForTenant, createTenant, createVm, deleteVm, getTenantUsage, tenants, vms],
   )
 
   return <CloudContext.Provider value={value}>{children}</CloudContext.Provider>

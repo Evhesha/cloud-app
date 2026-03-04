@@ -15,7 +15,7 @@ exports.register = async (req, res) => {
       name, 
       email, 
       password,
-      role_id: Role.ADMIN
+      role_id: Role.USER
     });
     
     res.status(201).json({
@@ -60,12 +60,15 @@ exports.login = async (req, res) => {
       { expiresIn: '24h' }
     );
 
-    res.cookie('token', token, {
-      httpOnly: true,
+    const cookieOptions = {
+      // Allow frontend JS to read cookie (requested behavior).
+      httpOnly: false,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict',
-      maxAge: 24 * 60 * 60 * 1000
-    });
+      maxAge: 24 * 60 * 60 * 1000,
+    };
+
+    res.cookie('token', token, cookieOptions);
 
     res.json({
       user: {
@@ -83,6 +86,9 @@ exports.login = async (req, res) => {
 
 // Выход из аккаунта
 exports.logout = (req, res) => {
-  res.clearCookie('token');
+  res.clearCookie('token', {
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict',
+  });
   res.json({ message: 'Выход выполнен' });
 };

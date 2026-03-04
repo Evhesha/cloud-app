@@ -1,51 +1,92 @@
+import { useMemo } from 'react'
+import { NavLink } from 'react-router-dom'
+import Cookies from 'js-cookie'
+import { jwtDecode } from 'jwt-decode'
 import { useCloud } from '../../context/CloudContext'
 import { useAuth } from '../../context/AuthContext'
-import type { NodeStatus } from '../../types/cloud'
-import { useEffect, useState } from 'react'
-import { jwtDecode } from 'jwt-decode'
-import Cookies from 'js-cookie'
 
-const nodeLabel: Record<NodeStatus, string> = {
-  healthy: 'Healthy',
-  warning: 'Warning',
-  critical: 'Critical',
-  maintenance: 'Maintenance',
+type TokenPayload = {
+  email?: string
 }
 
-function percent(used: number, quota: number) {
-  if (!quota) {
+type Capacity = {
+  vcpu: number
+  ramGb: number
+  storageGb: number
+  instances: number
+}
+
+const physicalCapacity: Capacity = {
+  vcpu: 512,
+  ramGb: 2048,
+  storageGb: 12000,
+  instances: 300,
+}
+
+function percent(used: number, total: number) {
+  if (!total) {
     return 0
   }
 
-  return Math.round((used / quota) * 100)
+  return Math.round((used / total) * 100)
+}
+
+function healthClass(usagePercent: number) {
+  if (usagePercent > 90) {
+    return 'util-critical'
+  }
+
+  if (usagePercent >= 70) {
+    return 'util-warning'
+  }
+
+  return 'util-healthy'
+}
+
+function segmentLabel(segment: 'enterprise' | 'mid-market' | 'startup') {
+  return segment === 'startup' ? 'Startup' : 'Corporate'
 }
 
 export function AdminPanelScreen() {
-  const { logout } = useAuth()
-  const { tenants, nodes, getTenantUsage } = useCloud()
-  const [email, setEmail] = useState<string | null>(null)
- 
-  useEffect(() => {
-    // try to read token from localStorage (change key if you store it elsewhere)
+  const { user, logout } = useAuth()
+  const { tenants, getTenantUsage } = useCloud()
 
+  const tokenEmail = useMemo(() => {
     const token = Cookies.get('token')
-    
-    
-    console.log(token)
     if (!token) {
-      return
+      return null
     }
-    const decodedToken = jwtDecode(token)
-    console.log(decodedToken.email)
+
     try {
-  
-     // setEmail(decodedToken.email)
-
-    } catch (err) {
-
-      console.error(err)
+      const payload = jwtDecode<TokenPayload>(token)
+      return payload.email ?? null
+    } catch {
+      return null
     }
   }, [])
+
+  const welcomeEmail = tokenEmail ?? user?.email ?? 'unknown'
+
+  const global = useMemo(() => {
+    const allocated = tenants.reduce(
+      (acc, tenant) => {
+        acc.vcpu += tenant.quota.vcpu
+        acc.ramGb += tenant.quota.ramGb
+        acc.storageGb += tenant.quota.storageGb
+        acc.instances += tenant.quota.instances
+        return acc
+      },
+      { vcpu: 0, ramGb: 0, storageGb: 0, instances: 0 },
+    )
+
+    return {
+      allocated,
+      vcpuPercent: percent(allocated.vcpu, physicalCapacity.vcpu),
+      ramPercent: percent(allocated.ramGb, physicalCapacity.ramGb),
+      storagePercent: percent(allocated.storageGb, physicalCapacity.storageGb),
+      instancePercent: percent(allocated.instances, physicalCapacity.instances),
+    }
+  }, [tenants])
 
   return (
     <section className="mts-page">
@@ -53,52 +94,66 @@ export function AdminPanelScreen() {
         <header className="page-head">
           <div>
             <p className="mts-kicker">Admin Panel</p>
-            Welcome {email}
-          
-            <h2>Infrastructure Health</h2>
+            <p>{`Welcome ${welcomeEmail}`}</p>
+            <h2>Global Infrastructure Overview</h2>
           </div>
-          <button type="button" className="btn-secondary-pill" onClick={() => void logout()}>
-            Logout
-          </button>
+          <div className="page-actions">
+            <NavLink to="/create-tenant" className="btn-primary-pill">
+              Add New Tenant
+            </NavLink>
+            <button type="button" className="btn-secondary-pill" onClick={() => void logout()}>
+              Logout
+            </button>
+          </div>
         </header>
 
-        <section className="panel-flat">
-          <div className="panel-head-inline">
-            <div>
-              <h3>System Health Matrix</h3>
-              <p>Live node state map across availability zones</p>
+        <section className="panel-flat overview-grid">
+          <article className="overview-card">
+            <strong>vCPU Capacity</strong>
+            <p>
+              {global.allocated.vcpu} / {physicalCapacity.vcpu}
+            </p>
+            <div className="util-track">
+              <span className={healthClass(global.vcpuPercent)} style={{ width: `${global.vcpuPercent}%` }} />
             </div>
-          </div>
+          </article>
 
-          <div className="health-matrix">
-            {nodes.map((node) => (
-              <div key={node.id} className="health-cell" title={`${node.id}: ${nodeLabel[node.status]}`}>
-                <span className={`health-dot ${node.status}`} />
-              </div>
-            ))}
-          </div>
+          <article className="overview-card">
+            <strong>RAM Capacity</strong>
+            <p>
+              {global.allocated.ramGb} / {physicalCapacity.ramGb} GB
+            </p>
+            <div className="util-track">
+              <span className={healthClass(global.ramPercent)} style={{ width: `${global.ramPercent}%` }} />
+            </div>
+          </article>
 
-          <div className="legend-row">
-            <span>
-              <i className="health-dot healthy" /> Healthy
-            </span>
-            <span>
-              <i className="health-dot warning" /> Warning
-            </span>
-            <span>
-              <i className="health-dot critical" /> Critical
-            </span>
-            <span>
-              <i className="health-dot maintenance" /> Maintenance
-            </span>
-          </div>
+          <article className="overview-card">
+            <strong>Storage Capacity</strong>
+            <p>
+              {global.allocated.storageGb} / {physicalCapacity.storageGb} GB
+            </p>
+            <div className="util-track">
+              <span className={healthClass(global.storagePercent)} style={{ width: `${global.storagePercent}%` }} />
+            </div>
+          </article>
+
+          <article className="overview-card">
+            <strong>Instance Slots</strong>
+            <p>
+              {global.allocated.instances} / {physicalCapacity.instances}
+            </p>
+            <div className="util-track">
+              <span className={healthClass(global.instancePercent)} style={{ width: `${global.instancePercent}%` }} />
+            </div>
+          </article>
         </section>
 
         <section className="panel-flat">
           <div className="panel-head-inline">
             <div>
-              <h3>Tenant Resource Distribution</h3>
-              <p>Quota utilization by tenant portfolio</p>
+              <h3>Tenants, Quotas, and Resource Utilization</h3>
+              <p>Control plane visibility across isolated tenant environments</p>
             </div>
           </div>
 
@@ -106,35 +161,73 @@ export function AdminPanelScreen() {
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Tenant</th>
+                  <th>Tenant Name</th>
                   <th>Segment</th>
-                  <th>vCPU</th>
-                  <th>RAM</th>
-                  <th>Storage</th>
-                  <th>Instances</th>
+                  <th>Quotas</th>
+                  <th>Resource Utilization</th>
+                  <th>Isolation Status</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {tenants.map((tenant) => {
                   const usage = getTenantUsage(tenant.id)
 
+                  const vcpuPct = percent(usage.vcpu, tenant.quota.vcpu)
+                  const ramPct = percent(usage.ramGb, tenant.quota.ramGb)
+                  const storagePct = percent(usage.storageGb, tenant.quota.storageGb)
+                  const instancePct = percent(usage.instances, tenant.quota.instances)
+
                   return (
                     <tr key={tenant.id}>
                       <td>
                         <strong>{tenant.name}</strong>
+                        <small>{tenant.id}</small>
                       </td>
-                      <td>{tenant.segment}</td>
+                      <td>{segmentLabel(tenant.segment)}</td>
                       <td>
-                        {usage.vcpu} / {tenant.quota.vcpu} ({percent(usage.vcpu, tenant.quota.vcpu)}%)
+                        <div className="quota-stack">
+                          <span>vCPU: {tenant.quota.vcpu}</span>
+                          <span>RAM: {tenant.quota.ramGb} GB</span>
+                          <span>Storage: {tenant.quota.storageGb} GB</span>
+                          <span>Max Instances: {tenant.quota.instances}</span>
+                        </div>
                       </td>
                       <td>
-                        {usage.ramGb} / {tenant.quota.ramGb} GB ({percent(usage.ramGb, tenant.quota.ramGb)}%)
+                        <div className="util-stack">
+                          <div>
+                            <small>vCPU {usage.vcpu}/{tenant.quota.vcpu}</small>
+                            <div className="util-track">
+                              <span className={healthClass(vcpuPct)} style={{ width: `${vcpuPct}%` }} />
+                            </div>
+                          </div>
+                          <div>
+                            <small>RAM {usage.ramGb}/{tenant.quota.ramGb} GB</small>
+                            <div className="util-track">
+                              <span className={healthClass(ramPct)} style={{ width: `${ramPct}%` }} />
+                            </div>
+                          </div>
+                          <div>
+                            <small>Storage {usage.storageGb}/{tenant.quota.storageGb} GB</small>
+                            <div className="util-track">
+                              <span className={healthClass(storagePct)} style={{ width: `${storagePct}%` }} />
+                            </div>
+                          </div>
+                          <div>
+                            <small>Instances {usage.instances}/{tenant.quota.instances}</small>
+                            <div className="util-track">
+                              <span className={healthClass(instancePct)} style={{ width: `${instancePct}%` }} />
+                            </div>
+                          </div>
+                        </div>
                       </td>
                       <td>
-                        {usage.storageGb} / {tenant.quota.storageGb} GB ({percent(usage.storageGb, tenant.quota.storageGb)}%)
+                        <span className="isolation-badge">Logical Isolation: VPC Active</span>
                       </td>
                       <td>
-                        {usage.instances} / {tenant.quota.instances}
+                        <button type="button" className="btn-primary-pill quota-btn">
+                          Adjust Quotas
+                        </button>
                       </td>
                     </tr>
                   )

@@ -1,17 +1,36 @@
 import { NavLink } from 'react-router-dom'
+import { useMemo } from 'react'
 import { StatusPill } from '../shared/StatusPill'
 import { useCloud } from '../../context/CloudContext'
 import { useAuth } from '../../context/AuthContext'
+import { tenantByUserEmail } from '../../data/mockCloud'
 
 function clampPercent(value: number) {
   return Math.max(0, Math.min(100, value))
 }
 
 export function CustomerDashboardScreen() {
-  const { logout } = useAuth()
-  const { activeTenant, activeTenantId, setActiveTenantId, tenants, vms, getTenantUsage } = useCloud()
-  const tenantVms = vms.filter((vm) => vm.tenantId === activeTenantId)
-  const usage = getTenantUsage(activeTenantId)
+  const { user, logout } = useAuth()
+  const { tenants, vms, getTenantUsage, deleteVm } = useCloud()
+
+  const activeTenant = useMemo(() => {
+    const emailKey = user?.email?.toLowerCase() ?? ''
+    const mappedTenantId = tenantByUserEmail[emailKey]
+    const byEmail = tenants.find((tenant) => tenant.id === mappedTenantId)
+    if (byEmail) {
+      return byEmail
+    }
+
+    const numericId = typeof user?.id === 'number' ? user.id : Number(user?.id)
+    if (Number.isFinite(numericId) && tenants.length > 0) {
+      return tenants[(Math.max(1, numericId) - 1) % tenants.length]
+    }
+
+    return tenants[0]
+  }, [tenants, user?.email, user?.id])
+
+  const tenantVms = vms.filter((vm) => vm.tenantId === activeTenant.id)
+  const usage = getTenantUsage(activeTenant.id)
 
   const vcpuPercent = clampPercent((usage.vcpu / activeTenant.quota.vcpu) * 100)
   const ramPercent = clampPercent((usage.ramGb / activeTenant.quota.ramGb) * 100)
@@ -23,6 +42,7 @@ export function CustomerDashboardScreen() {
           <div>
             <p className="mts-kicker">Customer Dashboard</p>
             <h2>Resource Overview</h2>
+            <p>{`Project: ${activeTenant.name}`}</p>
           </div>
           <div className="page-actions">
             <NavLink to="/create-instance" className="btn-primary-pill">
@@ -35,21 +55,6 @@ export function CustomerDashboardScreen() {
         </header>
 
         <section className="stat-bar-panel">
-          <div className="tenant-select-wrap">
-            <label htmlFor="tenant-select">Tenant</label>
-            <select
-              id="tenant-select"
-              value={activeTenantId}
-              onChange={(event) => setActiveTenantId(event.target.value)}
-            >
-              {tenants.map((tenant) => (
-                <option key={tenant.id} value={tenant.id}>
-                  {tenant.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
           <article>
             <div className="stat-head">
               <strong>vCPU Allocation</strong>
@@ -135,6 +140,9 @@ export function CustomerDashboardScreen() {
                         </button>
                         <button type="button" aria-label="Restart">
                           ↻
+                        </button>
+                        <button type="button" aria-label="Delete" onClick={() => deleteVm(vm.id)} title="Delete">
+                          🗑
                         </button>
                       </div>
                     </td>
