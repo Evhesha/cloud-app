@@ -10,6 +10,14 @@ type AuthResponse = {
   };
 }
 
+type RegisterResponse = {
+  id: number;
+  name: string;
+  email: string;
+  role_id: number;
+  createdAt: string;
+}
+
 type ErrorResponse = {
   error: string;
 }
@@ -79,7 +87,7 @@ export function AuthScreen() {
           email: formData.email,
           password: formData.password
         }),
-        credentials: 'include' // Важно для отправки и получения cookies
+        credentials: 'include'
       })
 
       const data = await response.json() as AuthResponse | ErrorResponse
@@ -88,17 +96,13 @@ export function AuthScreen() {
         throw new Error((data as ErrorResponse).error || 'Ошибка при входе')
       }
 
-      // Успешный вход
       setSuccess('Вход выполнен успешно!')
       
-      // Перенаправление в зависимости от роли
       const userData = data as AuthResponse
       setTimeout(() => {
         if (userData.user.role_id === 1) {
-          // Обычный пользователь
           window.location.href = '/customer-dashboard'
         } else {
-          // Админ
           window.location.href = '/admin-panel'
         }
       }, 1000)
@@ -133,7 +137,7 @@ export function AuthScreen() {
         credentials: 'include'
       })
 
-      const data = await response.json() as AuthResponse | ErrorResponse
+      const data = await response.json() as RegisterResponse | ErrorResponse
 
       if (!response.ok) {
         if (response.status === 409) {
@@ -143,12 +147,21 @@ export function AuthScreen() {
       }
 
       // Успешная регистрация
-      setSuccess('Регистрация выполнена успешно! Перенаправляем...')
+      setSuccess('Регистрация выполнена успешно! Теперь вы можете войти.')
       
-      // Автоматический вход после регистрации
+      // Очищаем форму
+      setFormData({
+        name: '',
+        email: '',
+        password: '',
+        confirmPassword: ''
+      })
+
+      // Переключаем на экран входа через 2 секунды
       setTimeout(() => {
-        window.location.href = '/customer-dashboard'
-      }, 1500)
+        setMode('login')
+        setSuccess(null)
+      }, 2000)
 
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Произошла ошибка')

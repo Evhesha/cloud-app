@@ -12,7 +12,7 @@ exports.register = async (req, res) => {
       name, 
       email, 
       password,
-      role_id: 1 // обычный пользователь
+      role_id: 1
     });
     
     res.status(201).json({
