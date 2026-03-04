@@ -28,14 +28,17 @@ module.exports = (sequelize) => {
       type: DataTypes.INTEGER,
       allowNull: false,
       defaultValue: 1,
-      references: {
-        model: 'roles',
-        key: 'id',
+      validate: {
+        isIn: [[1, 2]],
       },
+    },
+    tenant_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
     },
   }, {
     tableName: 'users',
-    timestamps: true,
+    timestamps: false,
     underscored: true,
     hooks: {
       beforeCreate: async (user) => {
@@ -53,9 +56,14 @@ module.exports = (sequelize) => {
     },
   });
 
-  // Метод для проверки пароля
+  // Метод проверки пароля
   User.prototype.comparePassword = async function(candidatePassword) {
     return await bcrypt.compare(candidatePassword, this.password);
+  };
+
+  // Ассоциации
+  User.associate = function(models) {
+    User.belongsTo(models.Tenant, { foreignKey: 'tenant_id' });
   };
 
   return User;
