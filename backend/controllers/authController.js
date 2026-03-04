@@ -1,6 +1,9 @@
 const { User } = require('../models');
 const jwt = require('jsonwebtoken');
-
+const Role = {
+  USER: 1,
+  ADMIN: 2
+};
 // Регистрация
 exports.register = async (req, res) => {
   const { name, email, password } = req.body;
@@ -12,7 +15,7 @@ exports.register = async (req, res) => {
       name, 
       email, 
       password,
-      role_id: 1
+      role_id: Role.ADMIN
     });
     
     res.status(201).json({

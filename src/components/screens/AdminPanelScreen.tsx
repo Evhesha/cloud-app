@@ -1,6 +1,9 @@
 import { useCloud } from '../../context/CloudContext'
 import { useAuth } from '../../context/AuthContext'
 import type { NodeStatus } from '../../types/cloud'
+import { useEffect, useState } from 'react'
+import { jwtDecode } from 'jwt-decode'
+import Cookies from 'js-cookie'
 
 const nodeLabel: Record<NodeStatus, string> = {
   healthy: 'Healthy',
@@ -20,6 +23,29 @@ function percent(used: number, quota: number) {
 export function AdminPanelScreen() {
   const { logout } = useAuth()
   const { tenants, nodes, getTenantUsage } = useCloud()
+  const [email, setEmail] = useState<string | null>(null)
+ 
+  useEffect(() => {
+    // try to read token from localStorage (change key if you store it elsewhere)
+
+    const token = Cookies.get('token')
+    
+    
+    console.log(token)
+    if (!token) {
+      return
+    }
+    const decodedToken = jwtDecode(token)
+    console.log(decodedToken.email)
+    try {
+  
+     // setEmail(decodedToken.email)
+
+    } catch (err) {
+
+      console.error(err)
+    }
+  }, [])
 
   return (
     <section className="mts-page">
@@ -27,6 +53,8 @@ export function AdminPanelScreen() {
         <header className="page-head">
           <div>
             <p className="mts-kicker">Admin Panel</p>
+            Welcome {email}
+          
             <h2>Infrastructure Health</h2>
           </div>
           <button type="button" className="btn-secondary-pill" onClick={() => void logout()}>
