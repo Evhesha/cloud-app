@@ -70,6 +70,15 @@ module.exports = (sequelize) => {
       type: DataTypes.INTEGER,
       allowNull: true,
     },
+    volume_name: {
+      type: DataTypes.STRING(255),
+      allowNull: true,
+      unique: true,
+    },
+    static_path: {
+      type: DataTypes.STRING(255),
+      allowNull: true, // можно хранить путь монтирования, но проще вычислять
+    },
   }, {
     tableName: 'virtual_machines',
     timestamps: false,
