@@ -145,16 +145,18 @@ exports.createVM = async (req, res) => {
 
     const quota = tenant.Quotum;
     if (!quota) return res.status(404).json({ error: 'Квота тенанта не найдена' });
-    if (current.vm_count + 1 > Number(quota.vm_limit)) {
+
+    if (+current.vm_count + 1 > quota.vm_limit) {
       return res.status(400).json({ error: 'Превышен лимит количества ВМ' });
     }
-    if (current.total_cpu + cpuValue > Number(quota.cpu_limit)) {
+    if (+current.total_cpu + cpu > quota.cpu_limit) {
       return res.status(400).json({ error: 'Превышен лимит CPU' });
     }
-    if (current.total_ram + ramValue > Number(quota.ram_limit)) {
+    if (+current.total_ram + ram > quota.ram_limit) {
       return res.status(400).json({ error: 'Превышен лимит RAM' });
     }
-    if (current.total_disk + diskValue > Number(quota.disk_limit)) {
+    if (+current.total_disk + disk > quota.disk_limit) {
+
       return res.status(400).json({ error: 'Превышен лимит диска' });
     }
 
@@ -237,10 +239,10 @@ exports.createVM = async (req, res) => {
   }
 };
 
-// PATCH /virtual-machines/:id – обновление метаданных (только имя)
+// PATCH /virtual-machines/:id – обновление конфигурации ВМ
 exports.updateVM = async (req, res) => {
   const { id } = req.params;
-  const { name } = req.body;
+  const { name, cpu, ram } = req.body; // disk и port не меняем (требуют пересоздания)
   const { role_id, tenant_id } = req.user;
 
   try {
@@ -248,10 +250,68 @@ exports.updateVM = async (req, res) => {
     if (error) return res.status(403).json({ error });
     if (!vm) return res.status(404).json({ error: 'ВМ не найдена' });
 
-    if (name !== undefined) {
-      vm.name = name;
-      await vm.save();
+    // Проверяем, что хоть что-то передано
+    if (name === undefined && cpu === undefined && ram === undefined) {
+      return res.status(400).json({ error: 'Не указаны поля для обновления' });
     }
+
+    // Подготовка данных для обновления БД
+    const updateData = {};
+    if (name !== undefined) updateData.name = name;
+
+    // Если меняются ресурсы, проверяем квоты и применяем docker update
+    if (cpu !== undefined || ram !== undefined) {
+      // Получаем тенант и квоту
+      const tenant = await Tenant.findByPk(tenant_id, { include: Quota });
+      if (!tenant) return res.status(404).json({ error: 'Тенант не найден' });
+      if (!tenant.is_active) return res.status(400).json({ error: 'Тенант деактивирован' });
+
+      // Текущее использование ресурсов (исключая эту ВМ)
+      const usage = await VirtualMachine.findOne({
+        where: { tenant_id, id: { [Op.ne]: vm.id }, status: { [Op.not]: 'deleted' } },
+        attributes: [
+          [sequelize.fn('COUNT', sequelize.col('id')), 'vm_count'],
+          [sequelize.fn('COALESCE', sequelize.fn('SUM', sequelize.col('cpu')), 0), 'total_cpu'],
+          [sequelize.fn('COALESCE', sequelize.fn('SUM', sequelize.col('ram')), 0), 'total_ram']
+        ],
+        raw: true
+      });
+      const current = usage || { vm_count: 0, total_cpu: 0, total_ram: 0 };
+
+      // Вычисляем новые значения после изменения
+      const newCpu = cpu !== undefined ? cpu : vm.cpu;
+      const newRam = ram !== undefined ? ram : vm.ram;
+
+      // Проверка лимитов квоты
+      if (current.total_cpu + newCpu - vm.cpu > tenant.Quotum.cpu_limit) {
+        return res.status(400).json({ error: 'Превышен лимит CPU' });
+      }
+      if (current.total_ram + newRam - vm.ram > tenant.Quotum.ram_limit) {
+        return res.status(400).json({ error: 'Превышен лимит RAM' });
+      }
+
+      // Если контейнер существует и запущен, применяем docker update
+      if (vm.container_id && vm.status === 'running') {
+        try {
+          const container = docker.getContainer(vm.container_id);
+          const updateConfig = {};
+          if (cpu !== undefined) updateConfig.CpuShares = cpu * 1024; // или NanoCPUs? Лучше использовать CpuPeriod/CpuQuota, но для простоты используем CpuShares
+          if (ram !== undefined) updateConfig.Memory = ram * 1024 * 1024; // байты
+          await container.update(updateConfig);
+          console.log(`Контейнер ${vm.container_id} обновлён: CPU=${cpu}, RAM=${ram}`);
+        } catch (dockerErr) {
+          console.error('Ошибка обновления контейнера:', dockerErr);
+          return res.status(500).json({ error: 'Не удалось обновить ресурсы контейнера' });
+        }
+      }
+
+      // Обновляем поля в БД
+      if (cpu !== undefined) updateData.cpu = cpu;
+      if (ram !== undefined) updateData.ram = ram;
+    }
+
+    // Сохраняем изменения
+    await vm.update(updateData);
     res.json(vm);
   } catch (err) {
     console.error('Update VM error:', err);
@@ -259,7 +319,7 @@ exports.updateVM = async (req, res) => {
   }
 };
 
-// DELETE /virtual-machines/:id – удаление ВМ
+// DELETE /virtual-machines/:id – полное удаление ВМ и контейнера
 exports.deleteVM = async (req, res) => {
   const { id } = req.params;
   const { remove_image } = req.body || {};
@@ -270,32 +330,29 @@ exports.deleteVM = async (req, res) => {
     if (error) return res.status(403).json({ error });
     if (!vm) return res.status(404).json({ error: 'ВМ не найдена' });
 
-    // Если контейнер существует и не в статусе 'deleted', останавливаем и удаляем его
-    if (vm.container_id && vm.status !== 'deleted') {
+    // Если есть container_id, пытаемся остановить и удалить контейнер
+    if (vm.container_id) {
       try {
         const container = docker.getContainer(vm.container_id);
-        await container.stop();
+        // Проверяем существование контейнера (inspect)
+        await container.inspect(); // выбросит ошибку, если контейнер не существует
+        // Останавливаем (если запущен) и удаляем
+        await container.stop().catch(() => {}); // игнорируем ошибку остановки
         await container.remove();
+        console.log(`Контейнер ${vm.container_id} удалён`);
       } catch (dockerErr) {
-        console.error(`Ошибка удаления контейнера ${vm.container_id}:`, dockerErr);
-        // Продолжаем, даже если контейнер не найден (возможно, уже удалён вручную)
+        // Если контейнер не найден (404), просто логируем и продолжаем
+        if (dockerErr.statusCode === 404) {
+          console.log(`Контейнер ${vm.container_id} не найден, возможно уже удалён`);
+        } else {
+          console.error(`Ошибка при удалении контейнера ${vm.container_id}:`, dockerErr);
+          // Не прерываем удаление записи
+        }
       }
     }
 
-    let imageWarning = null;
-    if (remove_image) {
-      try {
-        const image = docker.getImage(vm.image);
-        await image.remove({ force: true });
-      } catch (imageErr) {
-        imageWarning = `Образ ${vm.image} не удалён: ${imageErr.message}`;
-        console.error(`Ошибка удаления образа ${vm.image}:`, imageErr);
-      }
-    }
-
-    // Мягкое удаление записи (можно и физическое)
-    await vm.update({ status: 'deleted' });
-    res.json({ message: 'ВМ удалена', warning: imageWarning });
+    await vm.destroy();
+    res.json({ message: 'ВМ и контейнер полностью удалены' });
   } catch (err) {
     console.error('Delete VM error:', err);
     res.status(500).json({ error: 'Ошибка сервера' });
