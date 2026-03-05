@@ -2,6 +2,9 @@ const express = require('express');
 const router = express.Router();
 const virtualMachinesController = require('../controllers/virtualMachinesController');
 const { authenticateToken, checkAdmin } = require('../middleware/auth');
+const multer = require('multer');
+const os = require('os');
+const upload = multer({ dest: os.tmpdir() });
 
 // Все маршруты требуют аутентификации
 router.use(authenticateToken);
@@ -17,5 +20,7 @@ router.delete('/:id', virtualMachinesController.deleteVM);
 router.post('/:id/start', virtualMachinesController.startVM);
 router.post('/:id/stop', virtualMachinesController.stopVM);
 // router.post('/:id/restart', virtualMachinesController.restartVM); // опционально
+router.post('/:id/upload', upload.array('files'), virtualMachinesController.uploadFiles);
+router.get('/:id/files', virtualMachinesController.listFiles); // опционально
 
 module.exports = router;
