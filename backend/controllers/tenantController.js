@@ -76,15 +76,15 @@ exports.getMyTenant = async (req, res) => {
 
 // POST /tenants – создание нового тенанта (только для админа)
 exports.createTenant = async (req, res) => {
-  const { quota_id, userIds } = req.body; // userIds - массив id пользователей
+  const { quota_id, emails } = req.body; // emails - массив email пользователей
 
   if (!quota_id) {
     return res.status(400).json({ error: 'Не указана квота (quota_id)' });
   }
 
-  // Проверяем, что userIds передан и является массивом (может быть пустым)
-  if (!Array.isArray(userIds)) {
-    return res.status(400).json({ error: 'userIds должен быть массивом' });
+  // Проверяем, что emails передан и является массивом (может быть пустым)
+  if (!Array.isArray(emails)) {
+    return res.status(400).json({ error: 'emails должен быть массивом' });
   }
 
   try {
@@ -102,20 +102,25 @@ exports.createTenant = async (req, res) => {
         { transaction: t }
       );
 
-      // 2. Если есть userIds, привязываем пользователей
-      if (userIds.length > 0) {
-        // Проверим, что все пользователи существуют (опционально)
-        const users = await User.findAll({ where: { id: userIds }, transaction: t });
-        if (users.length !== userIds.length) {
-          const foundIds = users.map(u => u.id);
-          const missing = userIds.filter(id => !foundIds.includes(id));
-          throw new Error(`Пользователи с id ${missing.join(', ')} не найдены`);
+      // 2. Если есть emails, привязываем пользователей
+      if (emails.length > 0) {
+        // Находим пользователей по email
+        const users = await User.findAll({ 
+          where: { email: { [Op.in]: emails } }, 
+          transaction: t 
+        });
+
+        // Проверяем, что все email найдены
+        if (users.length !== emails.length) {
+          const foundEmails = users.map(u => u.email);
+          const missing = emails.filter(email => !foundEmails.includes(email));
+          throw new Error(`Пользователи с email ${missing.join(', ')} не найдены`);
         }
 
         // Обновляем tenant_id у всех указанных пользователей
         await User.update(
           { tenant_id: newTenant.id },
-          { where: { id: userIds }, transaction: t }
+          { where: { email: { [Op.in]: emails } }, transaction: t }
         );
       }
 
@@ -130,7 +135,7 @@ exports.createTenant = async (req, res) => {
     // Получаем статистику использования (пустая)
     const stats = await getTenantStats(result.id);
 
-    // Получаем список привязанных пользователей (если нужно вернуть)
+    // Получаем список привязанных пользователей (с email)
     const attachedUsers = await User.findAll({
       where: { tenant_id: result.id },
       attributes: ['id', 'name', 'email']
