@@ -22,5 +22,7 @@ router.post('/:id/stop', virtualMachinesController.stopVM);
 // router.post('/:id/restart', virtualMachinesController.restartVM); // опционально
 router.post('/:id/upload', upload.array('files'), virtualMachinesController.uploadFiles);
 router.get('/:id/files', virtualMachinesController.listFiles); // опционально
+router.get('/:id/files/:fileName/content', virtualMachinesController.getFileContent);
+router.delete('/:id/files/:fileName', virtualMachinesController.deleteFile);
 
 module.exports = router;

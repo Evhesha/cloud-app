@@ -6,6 +6,7 @@ const path = require('path');
 const fs = require('fs').promises;
 const os = require('os');
 const tar = require('tar-fs');
+const { PassThrough } = require('stream');
 
 // Инициализация Docker клиента
 const docker = new Docker();
@@ -59,20 +60,22 @@ const copyFilesToVolume = async (volumeName, files) => {
 
   try {
     for (const file of files) {
-      // Создаём tar-архив из временного файла
-      const tarStream = tar.pack(path.dirname(file.path), {
-        entries: [path.basename(file.path)],
-        map: (header) => {
-          header.name = path.basename(file.path);
-          return header;
-        }
+      const safeName = path.basename(file.originalname || file.filename || 'upload.bin');
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'vm-upload-'));
+      const preparedPath = path.join(tempDir, safeName);
+      await fs.copyFile(file.path, preparedPath);
+
+      // Упаковываем файл под оригинальным именем, чтобы в контейнере он был читаемым
+      const tarStream = tar.pack(tempDir, {
+        entries: [safeName],
       });
 
       // Загружаем архив в контейнер и распаковываем в /mnt/volume
       await container.putArchive(tarStream, { path: '/mnt/volume' });
 
-      // Удаляем временный файл
+      // Удаляем временные файлы
       await fs.unlink(file.path);
+      await fs.rm(tempDir, { recursive: true, force: true });
     }
   } finally {
     await container.stop().catch(() => {});
@@ -113,6 +116,62 @@ const ensureImage = async (imageName) => {
         });
       });
     });
+  }
+};
+
+const runExec = async (container, cmd) => {
+  const exec = await container.exec({
+    Cmd: cmd,
+    AttachStdout: true,
+    AttachStderr: true,
+  });
+
+  const stream = await exec.start({ hijack: true, stdin: false });
+  const stdoutStream = new PassThrough();
+  const stderrStream = new PassThrough();
+  let stdout = '';
+  let stderr = '';
+
+  stdoutStream.on('data', (chunk) => {
+    stdout += chunk.toString('utf-8');
+  });
+  stderrStream.on('data', (chunk) => {
+    stderr += chunk.toString('utf-8');
+  });
+
+  docker.modem.demuxStream(stream, stdoutStream, stderrStream);
+
+  await new Promise((resolve, reject) => {
+    stream.on('end', resolve);
+    stream.on('error', reject);
+  });
+
+  const inspect = await exec.inspect();
+  return {
+    stdout,
+    stderr,
+    exitCode: inspect.ExitCode,
+  };
+};
+
+const withVolumeContainer = async (volumeName, handler) => {
+  await ensureImage('busybox:latest');
+
+  const helper = await docker.createContainer({
+    Image: 'busybox:latest',
+    HostConfig: {
+      Binds: [`${volumeName}:/mnt/volume`]
+    },
+    Entrypoint: ['sleep', 'infinity']
+  });
+
+  await helper.start();
+
+  try {
+    return await handler(helper);
+  } finally {
+    await helper.stop().catch(() => {});
+    await helper.remove().catch(() => {});
   }
 };
 
@@ -415,23 +474,104 @@ exports.listFiles = async (req, res) => {
       return res.json([]);
     }
 
-    const volume = await docker.getVolume(vm.volume_name).inspect();
-    const volumePath = volume.Mountpoint;
-    const files = await fs.readdir(volumePath);
-    const filesInfo = await Promise.all(
-      files.map(async (file) => {
-        const stat = await fs.stat(path.join(volumePath, file));
-        return {
-          name: file,
-          size: stat.size,
-          modified: stat.mtime,
-          isDirectory: stat.isDirectory()
-        };
-      })
-    );
+    const filesInfo = await withVolumeContainer(vm.volume_name, async (helper) => {
+      const command = [
+        'sh',
+        '-lc',
+        'for f in /mnt/volume/*; do [ -f "$f" ] || continue; n=$(basename "$f"); s=$(wc -c < "$f" | tr -d " "); m=$(stat -c %Y "$f" 2>/dev/null || date +%s); echo "$n|$s|$m"; done'
+      ];
+
+      const { stdout, stderr, exitCode } = await runExec(helper, command);
+      if (exitCode !== 0) {
+        throw new Error(stderr || 'Не удалось прочитать список файлов');
+      }
+
+      return stdout
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .map((line) => {
+          const [name, sizeRaw, modifiedRaw] = line.split('|');
+          const size = Number(sizeRaw || 0);
+          const modifiedTs = Number(modifiedRaw || 0);
+          return {
+            name,
+            size: Number.isFinite(size) ? size : 0,
+            modified: Number.isFinite(modifiedTs) && modifiedTs > 0
+              ? new Date(modifiedTs * 1000).toISOString()
+              : new Date().toISOString(),
+            isDirectory: false
+          };
+        });
+    });
+
     res.json(filesInfo);
   } catch (err) {
     console.error('List files error:', err);
+    res.status(500).json({ error: 'Ошибка сервера' });
+  }
+};
+
+// GET /virtual-machines/:id/files/:fileName/content - получить содержимое файла
+exports.getFileContent = async (req, res) => {
+  const { id, fileName } = req.params;
+  const { role_id, tenant_id } = req.user;
+
+  try {
+    const { vm, error } = await checkVMAccess(id, req.user.id, role_id, tenant_id);
+    if (error) return res.status(403).json({ error });
+    if (!vm) return res.status(404).json({ error: 'ВМ не найдена' });
+    if (!vm.volume_name) {
+      return res.status(400).json({ error: 'У этой ВМ нет тома для статических файлов' });
+    }
+
+    const safeName = path.basename(fileName);
+    const content = await withVolumeContainer(vm.volume_name, async (helper) => {
+      const { stdout, stderr, exitCode } = await runExec(helper, ['cat', `/mnt/volume/${safeName}`]);
+      if (exitCode !== 0) {
+        throw new Error(stderr || 'Файл не найден');
+      }
+      return stdout;
+    });
+
+    res.json({
+      name: safeName,
+      content,
+    });
+  } catch (err) {
+    console.error('Get file content error:', err);
+    res.status(500).json({ error: 'Ошибка сервера' });
+  }
+};
+
+// DELETE /virtual-machines/:id/files/:fileName - удалить файл из volume ВМ
+exports.deleteFile = async (req, res) => {
+  const { id, fileName } = req.params;
+  const { role_id, tenant_id } = req.user;
+
+  try {
+    const { vm, error } = await checkVMAccess(id, req.user.id, role_id, tenant_id);
+    if (error) return res.status(403).json({ error });
+    if (!vm) return res.status(404).json({ error: 'ВМ не найдена' });
+    if (!vm.volume_name) {
+      return res.status(400).json({ error: 'У этой ВМ нет тома для статических файлов' });
+    }
+
+    const safeName = path.basename(fileName);
+    if (!safeName || safeName === '.' || safeName === '..') {
+      return res.status(400).json({ error: 'Некорректное имя файла' });
+    }
+
+    await withVolumeContainer(vm.volume_name, async (helper) => {
+      const { stderr, exitCode } = await runExec(helper, ['rm', '-f', `/mnt/volume/${safeName}`]);
+      if (exitCode !== 0) {
+        throw new Error(stderr || 'Не удалось удалить файл');
+      }
+    });
+
+    res.json({ message: 'Файл удалён', name: safeName });
+  } catch (err) {
+    console.error('Delete file error:', err);
     res.status(500).json({ error: 'Ошибка сервера' });
   }
 };
