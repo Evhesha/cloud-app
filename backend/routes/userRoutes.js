@@ -7,10 +7,8 @@ const {
   updateUser,
   deleteUser
 } = require('../controllers/userController');
-
 const router = express.Router();
 
-// Все маршруты ниже защищены middleware authenticateToken
 router.use(authenticateToken);
 
 router.get('/profile', getProfile);
