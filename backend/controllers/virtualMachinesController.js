@@ -1,9 +1,84 @@
 const { VirtualMachine, Tenant, Quota, Network, sequelize } = require('../models');
 const { Op } = require('sequelize');
 const Docker = require('dockerode');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs').promises;
+const os = require('os');
+const tar = require('tar-fs');
 
 // Инициализация Docker клиента
 const docker = new Docker();
+
+
+// Функция для определения пути к статике в контейнере по имени образа
+const getStaticPathForImage = (image) => {
+  const paths = {
+    'nginx:alpine': '/usr/share/nginx/html',
+    'httpd:alpine': '/usr/local/apache2/htdocs/',
+    'caddy:alpine': '/var/www/html',
+    'flashspys/nginx-static': '/usr/share/nginx/html',
+    'polygnome/lighttpd': '/var/www/localhost/htdocs/',
+  };
+  return paths[image] || '/usr/share/nginx/html'; // по умолчанию для nginx
+};
+
+// Создание Docker volume для ВМ
+const createVolumeForVM = async (vmId) => {
+  const volumeName = `vm_${vmId}_static_${Date.now()}`;
+  await docker.createVolume({
+    Name: volumeName,
+    Labels: { vm_id: vmId.toString(), created_by: 'cloud-app' }
+  });
+  return volumeName;
+};
+
+// Удаление volume (при удалении ВМ)
+const removeVolume = async (volumeName) => {
+  try {
+    const volume = docker.getVolume(volumeName);
+    await volume.remove();
+  } catch (err) {
+    console.error(`Ошибка удаления volume ${volumeName}:`, err);
+  }
+};
+
+// Копирование файлов в Docker volume через временный контейнер
+const copyFilesToVolume = async (volumeName, files) => {
+  const imageName = 'busybox:latest'; // используем busybox вместо alpine
+  await ensureImage(imageName);        // гарантируем наличие образа
+
+  const container = await docker.createContainer({
+    Image: imageName,
+    HostConfig: {
+      Binds: [`${volumeName}:/mnt/volume`]
+    },
+    Entrypoint: ['sleep', 'infinity']
+  });
+  await container.start();
+
+  try {
+    for (const file of files) {
+      // Создаём tar-архив из временного файла
+      const tarStream = tar.pack(path.dirname(file.path), {
+        entries: [path.basename(file.path)],
+        map: (header) => {
+          header.name = path.basename(file.path);
+          return header;
+        }
+      });
+
+      // Загружаем архив в контейнер и распаковываем в /mnt/volume
+      await container.putArchive(tarStream, { path: '/mnt/volume' });
+
+      // Удаляем временный файл
+      await fs.unlink(file.path);
+    }
+  } finally {
+    await container.stop().catch(() => {});
+    await container.remove().catch(() => {});
+  }
+};
 
 // Вспомогательная функция для проверки прав доступа к ВМ
 const checkVMAccess = async (vmId, userId, userRole, userTenantId) => {
@@ -86,6 +161,7 @@ exports.createVM = async (req, res) => {
   const { tenant_id: userTenantId, role_id } = req.user;
   const tenant_id = role_id === 2 && requestedTenantId ? Number(requestedTenantId) : userTenantId;
 
+  // Валидация входных данных
   if (!name || !image || cpu === undefined || ram === undefined || disk === undefined) {
     return res.status(400).json({ error: 'Необходимо указать name, image, cpu, ram, disk' });
   }
@@ -114,17 +190,33 @@ exports.createVM = async (req, res) => {
 
   let vm = null;
   let container = null;
+  let volumeName = null; // для отслеживания созданного тома
+
+  // Функция определения пути к статике в контейнере по образу
+  const getStaticPathForImage = (image) => {
+    const paths = {
+      'nginx:alpine': '/usr/share/nginx/html',
+      'httpd:alpine': '/usr/local/apache2/htdocs/',
+      'caddy:alpine': '/var/www/html',
+      'flashspys/nginx-static': '/usr/share/nginx/html',
+      'polygnome/lighttpd': '/var/www/localhost/htdocs/',
+    };
+    return paths[image] || '/usr/share/nginx/html'; // значение по умолчанию
+  };
 
   try {
+    // Проверка тенанта и квоты
     const tenant = await Tenant.findByPk(tenant_id, { include: Quota });
     if (!tenant) return res.status(404).json({ error: 'Тенант не найден' });
     if (!tenant.is_active) return res.status(400).json({ error: 'Тенант деактивирован' });
 
+    // Проверка сети (если указана)
     if (network_id) {
       const network = await Network.findOne({ where: { id: network_id, tenant_id } });
       if (!network) return res.status(404).json({ error: 'Сеть не принадлежит вашему тенанту' });
     }
 
+    // Подсчёт текущего использования ресурсов тенанта
     const usage = await VirtualMachine.findOne({
       where: { tenant_id, status: { [Op.not]: 'deleted' } },
       attributes: [
@@ -143,24 +235,24 @@ exports.createVM = async (req, res) => {
       total_disk: Number(usage?.total_disk) || 0,
     };
 
-    const quota = tenant.Quotum;
+    const quota = tenant.Quotum; // убедитесь, что имя ассоциации правильное (Quotum или quota)
     if (!quota) return res.status(404).json({ error: 'Квота тенанта не найдена' });
 
-    if (+current.vm_count + 1 > quota.vm_limit) {
+    // Проверка лимитов
+    if (current.vm_count + 1 > quota.vm_limit) {
       return res.status(400).json({ error: 'Превышен лимит количества ВМ' });
     }
-    if (+current.total_cpu + cpu > quota.cpu_limit) {
+    if (current.total_cpu + cpuValue > quota.cpu_limit) {
       return res.status(400).json({ error: 'Превышен лимит CPU' });
     }
-    if (+current.total_ram + ram > quota.ram_limit) {
+    if (current.total_ram + ramValue > quota.ram_limit) {
       return res.status(400).json({ error: 'Превышен лимит RAM' });
     }
-    if (+current.total_disk + disk > quota.disk_limit) {
-
+    if (current.total_disk + diskValue > quota.disk_limit) {
       return res.status(400).json({ error: 'Превышен лимит диска' });
     }
 
-    // Сначала резервируем запись в БД, чтобы не потерять ВМ при сбое после создания контейнера.
+    // --- Создание записи ВМ (без container_id и volume) ---
     vm = await VirtualMachine.create({
       tenant_id,
       network_id: network_id || null,
@@ -170,18 +262,34 @@ exports.createVM = async (req, res) => {
       ram: ramValue,
       disk: diskValue,
       port: portValue,
-      status: 'creating'
+      status: 'creating' // временный статус
     });
 
-    await ensureImage(image);
+    // --- Создание Docker volume для статических файлов ---
+    volumeName = `vm_${vm.id}_static_${Date.now()}`;
+    await docker.createVolume({
+      Name: volumeName,
+      Labels: {
+        'vm_id': vm.id.toString(),
+        'tenant_id': tenant_id.toString(),
+        'created_by': 'cloud-app'
+      }
+    });
+
+    // Путь внутри контейнера для монтирования
+    const staticPath = getStaticPathForImage(image);
+
+    // --- Подготовка конфигурации контейнера ---
+    await ensureImage(image); // скачиваем образ, если его нет
 
     const containerConfig = {
       Image: image,
-      name: `vm_${Date.now()}_${name.replace(/[^a-zA-Z0-9]/g, '_')}`,
+      name: `vm_${vm.id}_${name.replace(/[^a-zA-Z0-9]/g, '_')}`,
       HostConfig: {
-        Memory: ramValue * 1024 * 1024,
-        NanoCPUs: cpuValue * 1e9,
-        PortBindings: {}
+        Memory: ramValue * 1024 * 1024, // МБ -> байты
+        NanoCPUs: cpuValue * 1e9,       // ядра в нано
+        PortBindings: {},
+        Binds: [`${volumeName}:${staticPath}`] // монтируем том
       },
       ExposedPorts: {}
     };
@@ -191,22 +299,34 @@ exports.createVM = async (req, res) => {
       containerConfig.HostConfig.PortBindings[`${portValue}/tcp`] = [{ HostPort: String(portValue) }];
     }
 
+    // --- Создание и запуск контейнера ---
     container = await docker.createContainer(containerConfig);
     await container.start();
 
+    // Получаем IP-адрес контейнера
     const ip = await getContainerIp(container);
 
+    // --- Обновляем запись ВМ ---
     await vm.update({
       container_id: container.id,
       ip_address: ip,
+      volume_name: volumeName,
+      static_path: staticPath,
       status: 'running'
     });
 
+    // Успешный ответ
     res.status(201).json({
       message: 'ВМ успешно создана',
-      vm
+      vm: {
+        ...vm.toJSON(),
+        // можно добавить дополнительную информацию
+      }
     });
   } catch (err) {
+    // Обработка ошибок: откатываем созданные ресурсы
+
+    // Если был создан контейнер, удаляем его
     if (container) {
       try {
         await container.remove({ force: true });
@@ -215,27 +335,104 @@ exports.createVM = async (req, res) => {
       }
     }
 
+    // Если был создан volume, удаляем его
+    if (volumeName) {
+      try {
+        const volume = docker.getVolume(volumeName);
+        await volume.remove();
+      } catch (volumeCleanupError) {
+        console.error('Volume cleanup error:', volumeCleanupError);
+      }
+    }
+
+    // Если была создана запись в БД, удаляем или помечаем как ошибку
     if (vm) {
       try {
-        await vm.update({
-          container_id: null,
-          ip_address: null,
-          status: 'suspended'
-        });
-      } catch (cleanupError) {
-        console.error('VM fallback status update error:', cleanupError);
+        // Можно либо удалить запись, либо пометить как failed
+        await vm.destroy(); // полное удаление, чтобы не было мусора
+      } catch (dbCleanupError) {
+        console.error('DB cleanup error:', dbCleanupError);
       }
 
-      console.error('Create VM provisioning error:', err);
-      return res.status(202).json({
-        message: 'ВМ создана в БД, но запуск контейнера не удался',
-        warning: err.message,
-        vm
+      // Возвращаем информацию, что создание не удалось
+      return res.status(500).json({
+        error: `Ошибка создания ВМ: ${err.message}`,
+        details: 'Все ресурсы были откачены'
       });
     }
 
+    // Если ошибка произошла до создания записи
     console.error('Create VM error:', err);
     res.status(500).json({ error: `Ошибка создания ВМ: ${err.message}` });
+  }
+};
+
+exports.uploadFiles = async (req, res) => {
+  const { id } = req.params;
+  const { role_id, tenant_id } = req.user;
+  const files = req.files;
+
+  if (!files || files.length === 0) {
+    return res.status(400).json({ error: 'Файлы не выбраны' });
+  }
+
+  try {
+    const { vm, error } = await checkVMAccess(id, req.user.id, role_id, tenant_id);
+    if (error) return res.status(403).json({ error });
+    if (!vm) return res.status(404).json({ error: 'ВМ не найдена' });
+    if (!vm.volume_name) {
+      return res.status(400).json({ error: 'У этой ВМ нет тома для статических файлов' });
+    }
+
+    // Копируем файлы в volume через временный контейнер
+    await copyFilesToVolume(vm.volume_name, files);
+
+    res.json({
+      message: 'Файлы успешно загружены',
+      files: files.map(f => f.originalname)
+    });
+  } catch (err) {
+    console.error('Upload files error:', err);
+    // Очистка временных файлов в случае ошибки
+    for (const file of files) {
+      await fs.unlink(file.path).catch(() => {});
+    }
+    res.status(500).json({ error: `Ошибка загрузки файлов: ${err.message}` });
+  }
+};
+
+// Получение списка файлов (опционально)
+exports.listFiles = async (req, res) => {
+  const { id } = req.params;
+  const { role_id, tenant_id } = req.user;
+
+  try {
+    const { vm, error } = await checkVMAccess(id, req.user.id, role_id, tenant_id);
+    if (error) return res.status(403).json({ error });
+    if (!vm) return res.status(404).json({ error: 'ВМ не найдена' });
+
+    if (!vm.volume_name) {
+      return res.json([]);
+    }
+
+    const volume = await docker.getVolume(vm.volume_name).inspect();
+    const volumePath = volume.Mountpoint;
+    const files = await fs.readdir(volumePath);
+    const filesInfo = await Promise.all(
+      files.map(async (file) => {
+        const stat = await fs.stat(path.join(volumePath, file));
+        return {
+          name: file,
+          size: stat.size,
+          modified: stat.mtime,
+          isDirectory: stat.isDirectory()
+        };
+      })
+    );
+    res.json(filesInfo);
+  } catch (err) {
+    console.error('List files error:', err);
+    res.status(500).json({ error: 'Ошибка сервера' });
   }
 };
 
@@ -322,7 +519,6 @@ exports.updateVM = async (req, res) => {
 // DELETE /virtual-machines/:id – полное удаление ВМ и контейнера
 exports.deleteVM = async (req, res) => {
   const { id } = req.params;
-  const { remove_image } = req.body || {};
   const { role_id, tenant_id } = req.user;
 
   try {
@@ -330,29 +526,26 @@ exports.deleteVM = async (req, res) => {
     if (error) return res.status(403).json({ error });
     if (!vm) return res.status(404).json({ error: 'ВМ не найдена' });
 
-    // Если есть container_id, пытаемся остановить и удалить контейнер
+    // Удаление контейнера
     if (vm.container_id) {
       try {
         const container = docker.getContainer(vm.container_id);
-        // Проверяем существование контейнера (inspect)
-        await container.inspect(); // выбросит ошибку, если контейнер не существует
-        // Останавливаем (если запущен) и удаляем
-        await container.stop().catch(() => {}); // игнорируем ошибку остановки
+        await container.stop().catch(() => {});
         await container.remove();
-        console.log(`Контейнер ${vm.container_id} удалён`);
       } catch (dockerErr) {
-        // Если контейнер не найден (404), просто логируем и продолжаем
-        if (dockerErr.statusCode === 404) {
-          console.log(`Контейнер ${vm.container_id} не найден, возможно уже удалён`);
-        } else {
-          console.error(`Ошибка при удалении контейнера ${vm.container_id}:`, dockerErr);
-          // Не прерываем удаление записи
-        }
+        if (dockerErr.statusCode !== 404) console.error('Ошибка удаления контейнера:', dockerErr);
       }
     }
 
+    // Удаление volume
+    if (vm.volume_name) {
+      await removeVolume(vm.volume_name);
+    }
+
+    // Удаление записи из БД
     await vm.destroy();
-    res.json({ message: 'ВМ и контейнер полностью удалены' });
+
+    res.json({ message: 'ВМ и все данные удалены' });
   } catch (err) {
     console.error('Delete VM error:', err);
     res.status(500).json({ error: 'Ошибка сервера' });
