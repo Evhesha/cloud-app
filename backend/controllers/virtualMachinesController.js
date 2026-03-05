@@ -83,7 +83,7 @@ exports.getVMById = async (req, res) => {
 // POST /virtual-machines – создание ВМ
 exports.createVM = async (req, res) => {
   const { name, image, cpu, ram, disk, network_id, port } = req.body;
-  const { role_id, tenant_id } = req.user;
+  const { tenant_id } = req.user;
 
   // Валидация обязательных полей
   if (!name || !image || !cpu || !ram || !disk) {
@@ -119,20 +119,51 @@ exports.createVM = async (req, res) => {
     const current = usage || { vm_count: 0, total_cpu: 0, total_ram: 0, total_disk: 0 };
 
     // Проверка лимитов квоты
-    if (+current.vm_count + 1 > tenant.Quotum.vm_limit) {
+    const quota = tenant.Quotum; // или tenant.quota, в зависимости от ассоциации
+    if (!quota) return res.status(404).json({ error: 'Квота тенанта не найдена' });
+    if (current.vm_count + 1 > quota.vm_limit) {
       return res.status(400).json({ error: 'Превышен лимит количества ВМ' });
     }
-    if (+current.total_cpu + cpu > tenant.Quotum.cpu_limit) {
+    if (current.total_cpu + cpu > quota.cpu_limit) {
       return res.status(400).json({ error: 'Превышен лимит CPU' });
     }
-    if (+current.total_ram + ram > tenant.Quotum.ram_limit) {
+    if (current.total_ram + ram > quota.ram_limit) {
       return res.status(400).json({ error: 'Превышен лимит RAM' });
     }
-    if (+current.total_disk + disk > tenant.Quotum.disk_limit) {
+    if (current.total_disk + disk > quota.disk_limit) {
       return res.status(400).json({ error: 'Превышен лимит диска' });
     }
 
-    // Создаём запись ВМ со статусом 'creating'
+    // --- РЕАЛЬНОЕ СОЗДАНИЕ КОНТЕЙНЕРА ---
+    // Убедимся, что образ есть локально
+    await ensureImage(image);
+
+    // Параметры контейнера
+    const containerConfig = {
+      Image: image,
+      name: `vm_${Date.now()}_${name.replace(/[^a-zA-Z0-9]/g, '_')}`,
+      HostConfig: {
+        Memory: ram * 1024 * 1024, // МБ -> байты
+        NanoCPUs: cpu * 1e9,       // CPU в наноядрах
+        PortBindings: {}
+      },
+      ExposedPorts: {}
+    };
+
+    // Проброс порта, если указан
+    if (port) {
+      containerConfig.ExposedPorts[`${port}/tcp`] = {};
+      containerConfig.HostConfig.PortBindings[`${port}/tcp`] = [{ HostPort: port.toString() }];
+    }
+
+    // Создаём и запускаем контейнер
+    const container = await docker.createContainer(containerConfig);
+    await container.start();
+
+    // Получаем IP-адрес контейнера
+    const ip = await getContainerIp(container);
+
+    // --- ТОЛЬКО ТЕПЕРЬ СОЗДАЁМ ЗАПИСЬ В БД ---
     const vm = await VirtualMachine.create({
       tenant_id,
       network_id: network_id || null,
@@ -142,67 +173,20 @@ exports.createVM = async (req, res) => {
       ram,
       disk,
       port,
-      status: 'creating'
+      container_id: container.id,
+      ip_address: ip,
+      status: 'running'
     });
 
-    // Асинхронно запускаем Docker контейнер, чтобы не блокировать ответ
-    (async () => {
-      try {
-        // Убедимся, что образ есть локально
-        await ensureImage(image);
-
-        // Параметры контейнера
-        const containerConfig = {
-          Image: image,
-          name: `vm_${vm.id}_${name.replace(/[^a-zA-Z0-9]/g, '_')}`,
-          HostConfig: {
-            Memory: ram * 1024 * 1024, // МБ -> байты
-            NanoCPUs: cpu * 1e9,        // cpu ядра в нано
-            PortBindings: {}
-          },
-          ExposedPorts: {}
-        };
-
-        // Проброс порта, если указан
-        if (port) {
-          containerConfig.ExposedPorts[`${port}/tcp`] = {};
-          containerConfig.HostConfig.PortBindings[`${port}/tcp`] = [{ HostPort: port.toString() }];
-        }
-
-        // Создаём контейнер
-        const container = await docker.createContainer(containerConfig);
-        await container.start();
-
-        // Получаем IP-адрес контейнера
-        const ip = await getContainerIp(container);
-
-        // Обновляем запись в БД
-        await vm.update({
-          container_id: container.id,
-          ip_address: ip,
-          status: 'running'
-        });
-        console.log(`Контейнер для ВМ ${vm.id} успешно запущен`);
-      } catch (err) {
-        console.error(`Ошибка запуска контейнера для ВМ ${vm.id}:`, err);
-        // Обновляем статус на 'stopped' (или можно добавить поле error)
-        await vm.update({ status: 'stopped' });
-      }
-    })();
-
-    // Возвращаем клиенту информацию о создаваемой ВМ
-    res.status(202).json({
-      message: 'ВМ создаётся, контейнер запускается',
-      vm: {
-        ...vm.toJSON(),
-        container_id: null,
-        ip_address: null,
-        status: 'creating'
-      }
+    // Возвращаем успешный ответ
+    res.status(201).json({
+      message: 'ВМ успешно создана',
+      vm
     });
   } catch (err) {
     console.error('Create VM error:', err);
-    res.status(500).json({ error: 'Ошибка сервера' });
+    // Здесь НЕ ИСПОЛЬЗУЕМ переменную vm, так как она могла не создаться
+    res.status(500).json({ error: `Ошибка создания ВМ: ${err.message}` });
   }
 };
 
