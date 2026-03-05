@@ -6,6 +6,7 @@ const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
 const tenantRoutes = require('./routes/tenantRoutes');
 const networkRoutes = require('./routes/networkRoutes');
+const virtualMachinesRoutes = require('./routes/virtualMachinesRoutes');
 const db = require('./models');
 const bcrypt = require('bcrypt');
 
@@ -32,6 +33,7 @@ app.use('/', authRoutes);
 app.use('/', userRoutes);
 app.use('/tenants', tenantRoutes);
 app.use('/networks', networkRoutes);
+app.use('/vms', virtualMachinesRoutes);
 
 // Синхронизация БД
 (async () => {
