@@ -74,55 +74,80 @@ exports.getMyTenant = async (req, res) => {
   }
 };
 
-// POST /tenants – создание нового тенанта
+// POST /tenants – создание нового тенанта (только для админа)
 exports.createTenant = async (req, res) => {
-  const { quota_id } = req.body;
-  const userId = req.user.id;
+  const { quota_id, userIds } = req.body; // userIds - массив id пользователей
 
   if (!quota_id) {
     return res.status(400).json({ error: 'Не указана квота (quota_id)' });
   }
 
-  try {
-    // Проверяем, есть ли уже тенант у пользователя
-    if (req.user.tenant_id) {
-      return res.status(400).json({ error: 'У вас уже есть тенант' });
-    }
+  // Проверяем, что userIds передан и является массивом (может быть пустым)
+  if (!Array.isArray(userIds)) {
+    return res.status(400).json({ error: 'userIds должен быть массивом' });
+  }
 
+  try {
     // Проверяем существование квоты
     const quota = await Quota.findByPk(quota_id);
     if (!quota) {
       return res.status(404).json({ error: 'Квота не найдена' });
     }
 
-    // Создаём тенант в транзакции
+    // Начинаем транзакцию
     const result = await sequelize.transaction(async (t) => {
+      // 1. Создаём тенант
       const newTenant = await Tenant.create(
         { quota_id, is_active: true },
         { transaction: t }
       );
 
-      // Привязываем текущего пользователя к новому тенанту
-      await User.update(
-        { tenant_id: newTenant.id },
-        { where: { id: userId }, transaction: t }
-      );
+      // 2. Если есть userIds, привязываем пользователей
+      if (userIds.length > 0) {
+        // Проверим, что все пользователи существуют (опционально)
+        const users = await User.findAll({ where: { id: userIds }, transaction: t });
+        if (users.length !== userIds.length) {
+          const foundIds = users.map(u => u.id);
+          const missing = userIds.filter(id => !foundIds.includes(id));
+          throw new Error(`Пользователи с id ${missing.join(', ')} не найдены`);
+        }
+
+        // Обновляем tenant_id у всех указанных пользователей
+        await User.update(
+          { tenant_id: newTenant.id },
+          { where: { id: userIds }, transaction: t }
+        );
+      }
 
       return newTenant;
     });
 
-    // Возвращаем созданный тенант с квотой и статистикой (пока 0)
+    // Получаем созданный тенант с квотой
     const tenantWithQuota = await Tenant.findByPk(result.id, {
       include: [{ model: Quota }]
     });
+
+    // Получаем статистику использования (пустая)
     const stats = await getTenantStats(result.id);
+
+    // Получаем список привязанных пользователей (если нужно вернуть)
+    const attachedUsers = await User.findAll({
+      where: { tenant_id: result.id },
+      attributes: ['id', 'name', 'email']
+    });
+
     const response = {
       ...tenantWithQuota.toJSON(),
-      ...stats
+      ...stats,
+      users: attachedUsers
     };
+
     res.status(201).json(response);
   } catch (err) {
     console.error('Create tenant error:', err);
+    if (err.message && err.message.includes('не найдены')) {
+      return res.status(400).json({ error: err.message });
+    }
     res.status(500).json({ error: 'Ошибка сервера' });
   }
 };
