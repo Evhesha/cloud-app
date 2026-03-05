@@ -52,6 +52,10 @@ function clampPercent(value: number) {
   return Math.max(0, Math.min(100, value))
 }
 
+function isCriticalUsage(percent: number) {
+  return percent >= 80
+}
+
 function mapVmStatus(status: ApiVirtualMachine['status']): VmStatus {
   if (status === 'running') return 'RUNNING'
   if (status === 'stopped') return 'STOPPED'
@@ -196,6 +200,13 @@ export function CustomerDashboardScreen() {
     }
   }
 
+  const handleLogout = async () => {
+    if (!confirm('Are you sure you want to log out?')) {
+      return
+    }
+    await logout()
+  }
+
   if (loading) {
     return (
       <section className="mts-page">
@@ -216,7 +227,7 @@ export function CustomerDashboardScreen() {
               <h2>No Tenant Assigned</h2>
             </div>
             <div className="page-actions">
-              <button type="button" className="btn-secondary-pill" onClick={() => void logout()}>
+              <button type="button" className="btn-secondary-pill" onClick={() => void handleLogout()}>
                 Logout
               </button>
             </div>
@@ -258,7 +269,7 @@ export function CustomerDashboardScreen() {
             <NavLink to="/create-instance" className="btn-primary-pill">
               New Instance
             </NavLink>
-            <button type="button" className="btn-secondary-pill" onClick={() => void logout()}>
+            <button type="button" className="btn-secondary-pill" onClick={() => void handleLogout()}>
               Logout
             </button>
           </div>
@@ -273,7 +284,7 @@ export function CustomerDashboardScreen() {
               </span>
             </div>
             <div className="stat-track">
-              <div className="stat-fill" style={{ width: `${vcpuPercent}%` }} />
+              <div className={`stat-fill ${isCriticalUsage(vcpuPercent) ? 'stat-fill-critical' : ''}`} style={{ width: `${vcpuPercent}%` }} />
             </div>
           </article>
 
@@ -285,7 +296,7 @@ export function CustomerDashboardScreen() {
               </span>
             </div>
             <div className="stat-track">
-              <div className="stat-fill" style={{ width: `${ramPercent}%` }} />
+              <div className={`stat-fill ${isCriticalUsage(ramPercent) ? 'stat-fill-critical' : ''}`} style={{ width: `${ramPercent}%` }} />
             </div>
           </article>
 
@@ -298,7 +309,7 @@ export function CustomerDashboardScreen() {
             </div>
             <div className="stat-track">
               <div
-                className="stat-fill"
+                className={`stat-fill ${isCriticalUsage(instancePercent) ? 'stat-fill-critical' : ''}`}
                 style={{ width: `${instancePercent}%` }}
               />
             </div>
@@ -349,6 +360,9 @@ export function CustomerDashboardScreen() {
                       <td className="mono">{vm.ip}</td>
                       <td>
                         <div className="action-group">
+                          <NavLink to={`/instance-management/${vm.id}`} className="btn-primary-pill">
+                            Instance Management
+                          </NavLink>
                           <button
                             type="button"
                             aria-label={vm.status === 'RUNNING' ? 'Stop' : 'Start'}

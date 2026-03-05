@@ -49,10 +49,10 @@ function percent(used: number, total: number) {
 }
 
 function healthClass(usagePercent: number) {
-  if (usagePercent > 90) {
+  if (usagePercent >= 80) {
     return 'util-critical'
   }
-  if (usagePercent >= 70) {
+  if (usagePercent >= 60) {
     return 'util-warning'
   }
   return 'util-healthy'
@@ -242,6 +242,13 @@ export function AdminPanelScreen() {
     }
   }
 
+  const handleLogout = async () => {
+    if (!confirm('Are you sure you want to log out?')) {
+      return
+    }
+    await logout()
+  }
+
   if (loading) {
     return <div>Loading tenants...</div>
   }
@@ -259,7 +266,7 @@ export function AdminPanelScreen() {
             <NavLink to="/create-tenant" className="btn-primary-pill">
               Add New Tenant
             </NavLink>
-            <button type="button" className="btn-secondary-pill" onClick={() => void logout()}>
+            <button type="button" className="btn-secondary-pill" onClick={() => void handleLogout()}>
               Logout
             </button>
           </div>

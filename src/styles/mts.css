@@ -193,6 +193,10 @@ p {
   background: linear-gradient(90deg, #bcbcb8 0%, #8a8a86 100%);
 }
 
+.stat-fill-critical {
+  background: var(--mts-red);
+}
+
 .table-shell {
   border: 1px solid var(--mts-border);
   border-radius: var(--mts-radius-lg);
