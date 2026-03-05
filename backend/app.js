@@ -4,6 +4,7 @@ const cookieParser = require('cookie-parser');
 const cors = require('cors');
 const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
+const tenantRoutes = require('./routes/tenantRoutes');
 const db = require('./models');
 const bcrypt = require('bcrypt');
 
@@ -28,6 +29,7 @@ app.options('*', cors(corsOptions));
 // Подключение маршрутов
 app.use('/', authRoutes);
 app.use('/', userRoutes);
+app.use('/tenants', tenantRoutes);
 
 // Синхронизация БД
 (async () => {
