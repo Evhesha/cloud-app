@@ -1,5 +1,4 @@
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom'
-import { CloudProvider } from './context/CloudContext'
 import { AuthProvider, useAuth, type AuthRole } from './context/AuthContext'
 import { AdminPanelScreen } from './components/screens/AdminPanelScreen'
 import { AuthScreen } from './components/screens/AuthScreen'
@@ -25,7 +24,6 @@ function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <CloudProvider>
           <Routes>
             <Route path="/auth" element={<AuthScreen />} />
 
@@ -43,7 +41,6 @@ function App() {
             <Route path="/" element={<Navigate to="/auth" replace />} />
             <Route path="*" element={<Navigate to="/auth" replace />} />
           </Routes>
-        </CloudProvider>
       </AuthProvider>
     </BrowserRouter>
   )

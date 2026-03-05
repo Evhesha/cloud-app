@@ -11,6 +11,12 @@ type Quota = {
   vm_limit: number
 }
 
+type User = {
+  id: number
+  name: string
+  email: string
+}
+
 export function CreateTenantModalScreen() {
   const navigate = useNavigate()
   const [quotas] = useState<Quota[]>([
@@ -19,50 +25,84 @@ export function CreateTenantModalScreen() {
     { id: 3, name: 'professional', cpu_limit: 8, ram_limit: 16384, disk_limit: '200', vm_limit: 10 }
   ])
 
-  const [userEmail, setUserEmail] = useState('')
+  const [userEmails, setUserEmails] = useState<string>('') // Можно ввести несколько email через запятую
   const [selectedQuotaId, setSelectedQuotaId] = useState<number>(1)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [foundUsers, setFoundUsers] = useState<User[]>([]) // Найденные пользователи
+
+  // Функция для поиска пользователей по email
+  const findUsersByEmails = async (emails: string[]): Promise<User[]> => {
+    const token = Cookies.get('token')
+    const found: User[] = []
+    const notFound: string[] = []
+
+    // Ищем каждого пользователя по email
+    for (const email of emails) {
+      try {
+        const response = await fetch(`http://localhost:3000/users?email=${encodeURIComponent(email.trim())}`, {
+          method: 'GET',
+          credentials: 'include',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          }
+        })
+
+        if (!response.ok) {
+          notFound.push(email)
+          continue
+        }
+
+        const users = await response.json()
+        const user = Array.isArray(users) ? users[0] : users
+        
+        if (user && user.id) {
+          found.push(user)
+        } else {
+          notFound.push(email)
+        }
+      } catch (error) {
+        console.error(`Error finding user ${email}:`, error)
+        notFound.push(email)
+      }
+    }
+
+    if (notFound.length > 0) {
+      throw new Error(`Users not found: ${notFound.join(', ')}`)
+    }
+
+    return found
+  }
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
 
-    if (!userEmail.trim()) {
-      setError('User Email is required.')
+    if (!userEmails.trim()) {
+      setError('At least one user email is required.')
+      return
+    }
+
+    // Разбиваем email по запятой и удаляем лишние пробелы
+    const emailList = userEmails.split(',').map(email => email.trim()).filter(email => email.length > 0)
+    
+    if (emailList.length === 0) {
+      setError('Please enter valid email addresses.')
       return
     }
 
     setSubmitting(true)
     setError(null)
+    setFoundUsers([])
 
     try {
+      // Ищем пользователей по email
+      const users = await findUsersByEmails(emailList)
+      setFoundUsers(users)
+
       const token = Cookies.get('token')
       
-      // Сначала нужно получить ID пользователя по email
-      // Ищем пользователя по email
-      const userResponse = await fetch(`http://localhost:3000/users?email=${encodeURIComponent(userEmail)}`, {
-        method: 'GET',
-        credentials: 'include',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        }
-      })
-
-      if (!userResponse.ok) {
-        throw new Error('User not found')
-      }
-
-      const users = await userResponse.json()
-      
-      // Предполагаем, что API возвращает массив пользователей
-      const user = Array.isArray(users) ? users[0] : users
-      
-      if (!user || !user.id) {
-        throw new Error(`User with email ${userEmail} not found`)
-      }
-
-      // Создаем тенант с привязкой к пользователю
+      // Создаем тенант с привязкой к найденным пользователям
       const response = await fetch('http://localhost:3000/tenants', {
         method: 'POST',
         credentials: 'include',
@@ -72,7 +112,7 @@ export function CreateTenantModalScreen() {
         },
         body: JSON.stringify({
           quota_id: selectedQuotaId,
-          userIds: [user.id] // Передаем массив с ID пользователя
+          userIds: users.map(u => u.id) // Передаем массив ID найденных пользователей
         })
       })
 
@@ -83,6 +123,7 @@ export function CreateTenantModalScreen() {
 
       const data = await response.json()
       console.log('Tenant created:', data)
+      console.log('Assigned users:', users)
       
       navigate('/admin-panel')
     } catch (createError) {
@@ -107,21 +148,37 @@ export function CreateTenantModalScreen() {
 
         <form className="panel-flat deploy-form" onSubmit={submit}>
           <p className="project-line">
-            Administrator Control Plane: <strong>New Isolated Tenant Space</strong>
+            Administrator Control Plane: <strong>Create Tenant for Specific Users</strong>
           </p>
 
           <div className="form-grid">
             <label>
-              User Email
+              User Email(s)
               <input
-                type="email"
-                value={userEmail}
-                onChange={(event) => setUserEmail(event.target.value)}
-                placeholder="user@company.com"
+                type="text"
+                value={userEmails}
+                onChange={(event) => setUserEmails(event.target.value)}
+                placeholder="user1@company.com, user2@company.com"
                 required
               />
+              <small style={{ color: '#666', marginTop: '4px', display: 'block' }}>
+                Enter one or more email addresses separated by commas
+              </small>
             </label>
           </div>
+
+          {foundUsers.length > 0 && (
+            <div style={{ marginTop: '16px', padding: '12px', background: '#f0f9ff', borderRadius: '6px' }}>
+              <strong>Users to be assigned:</strong>
+              <ul style={{ marginTop: '8px', listStyle: 'none', padding: 0 }}>
+                {foundUsers.map(user => (
+                  <li key={user.id} style={{ padding: '4px 0' }}>
+                    • {user.name} ({user.email})
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           <div>
             <h3>Select Quota</h3>
