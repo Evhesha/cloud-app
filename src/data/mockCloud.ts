@@ -18,6 +18,7 @@ export const tenants: Tenant[] = [
     name: 'Acme Systems',
     ownerEmail: 'owner@acme.io',
     segment: 'enterprise',
+    status: 'ACTIVE',
     quota: { vcpu: 24, ramGb: 64, storageGb: 1200, instances: 10 },
   },
   {
@@ -25,6 +26,7 @@ export const tenants: Tenant[] = [
     name: 'Northwind Data',
     ownerEmail: 'owner@northwind.io',
     segment: 'mid-market',
+    status: 'ACTIVE',
     quota: { vcpu: 16, ramGb: 48, storageGb: 900, instances: 8 },
   },
   {
@@ -32,6 +34,7 @@ export const tenants: Tenant[] = [
     name: 'Vertex Labs',
     ownerEmail: 'owner@vertex.io',
     segment: 'startup',
+    status: 'ACTIVE',
     quota: { vcpu: 8, ramGb: 24, storageGb: 500, instances: 5 },
   },
 ]

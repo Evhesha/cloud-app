@@ -1,9 +1,10 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { NavLink } from 'react-router-dom'
 import Cookies from 'js-cookie'
 import { jwtDecode } from 'jwt-decode'
 import { useCloud } from '../../context/CloudContext'
 import { useAuth } from '../../context/AuthContext'
+import { StatusPill } from '../shared/StatusPill'
 
 type TokenPayload = {
   email?: string
@@ -43,13 +44,13 @@ function healthClass(usagePercent: number) {
   return 'util-healthy'
 }
 
-function segmentLabel(segment: 'enterprise' | 'mid-market' | 'startup') {
-  return segment === 'startup' ? 'Startup' : 'Corporate'
-}
-
 export function AdminPanelScreen() {
   const { user, logout } = useAuth()
-  const { tenants, getTenantUsage } = useCloud()
+  const { tenants, getTenantUsage, deleteTenant, toggleTenantStatus } = useCloud()
+
+  useEffect() => {
+    
+  }
 
   const tokenEmail = useMemo(() => {
     const token = Cookies.get('token')
@@ -152,8 +153,8 @@ export function AdminPanelScreen() {
         <section className="panel-flat">
           <div className="panel-head-inline">
             <div>
-              <h3>Tenants, Quotas, and Resource Utilization</h3>
-              <p>Control plane visibility across isolated tenant environments</p>
+              <h3>Tenant Lifecycle Control</h3>
+              <p>Manage quotas, status, and logical tenancy states</p>
             </div>
           </div>
 
@@ -162,10 +163,9 @@ export function AdminPanelScreen() {
               <thead>
                 <tr>
                   <th>Tenant Name</th>
-                  <th>Segment</th>
                   <th>Quotas</th>
                   <th>Resource Utilization</th>
-                  <th>Isolation Status</th>
+                  <th>Tenant Status</th>
                   <th>Actions</th>
                 </tr>
               </thead>
@@ -177,14 +177,14 @@ export function AdminPanelScreen() {
                   const ramPct = percent(usage.ramGb, tenant.quota.ramGb)
                   const storagePct = percent(usage.storageGb, tenant.quota.storageGb)
                   const instancePct = percent(usage.instances, tenant.quota.instances)
+                  const isDisabled = tenant.status === 'DISABLED'
 
                   return (
-                    <tr key={tenant.id}>
+                    <tr key={tenant.id} className={isDisabled ? 'tenant-row-disabled' : ''}>
                       <td>
                         <strong>{tenant.name}</strong>
-                        <small>{tenant.id}</small>
+                        <small>{tenant.ownerEmail}</small>
                       </td>
-                      <td>{segmentLabel(tenant.segment)}</td>
                       <td>
                         <div className="quota-stack">
                           <span>vCPU: {tenant.quota.vcpu}</span>
@@ -194,7 +194,8 @@ export function AdminPanelScreen() {
                         </div>
                       </td>
                       <td>
-                        <div className="util-stack">
+                        <div className={`util-stack ${isDisabled ? 'offline' : ''}`}>
+                          {isDisabled && <small className="offline-mark">Offline</small>}
                           <div>
                             <small>vCPU {usage.vcpu}/{tenant.quota.vcpu}</small>
                             <div className="util-track">
@@ -222,12 +223,30 @@ export function AdminPanelScreen() {
                         </div>
                       </td>
                       <td>
-                        <span className="isolation-badge">Logical Isolation: VPC Active</span>
+                        <StatusPill status={tenant.status} />
                       </td>
                       <td>
-                        <button type="button" className="btn-primary-pill quota-btn">
-                          Adjust Quotas
-                        </button>
+                        <div className="tenant-actions">
+                          <NavLink to={`/tenant-management/${tenant.id}`} className="btn-primary-pill quota-btn">
+                            Tenant Management
+                          </NavLink>
+                          <button
+                            type="button"
+                            className="btn-secondary-pill icon-pill"
+                            onClick={() => void toggleTenantStatus(tenant.id)}
+                            title={tenant.status === 'ACTIVE' ? 'Disable tenant' : 'Activate tenant'}
+                          >
+                            ⏻
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-secondary-pill icon-pill"
+                            onClick={() => void deleteTenant(tenant.id)}
+                            title="Delete tenant"
+                          >
+                            🗑
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   )

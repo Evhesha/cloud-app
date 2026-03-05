@@ -37,6 +37,7 @@ function App() {
             <Route element={<ProtectedRoute allowed={['admin']} />}>
               <Route path="/admin-panel" element={<AdminPanelScreen />} />
               <Route path="/create-tenant" element={<CreateTenantModalScreen />} />
+              <Route path="/tenant-management/:tenantId" element={<CreateTenantModalScreen />} />
             </Route>
 
             <Route path="/" element={<Navigate to="/auth" replace />} />

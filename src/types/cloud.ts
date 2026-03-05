@@ -12,11 +12,14 @@ export type CloudQuota = {
   instances: number
 }
 
+export type TenantStatus = 'ACTIVE' | 'DISABLED'
+
 export type Tenant = {
   id: string
   name: string
   ownerEmail: string
   segment: 'enterprise' | 'mid-market' | 'startup'
+  status: TenantStatus
   quota: CloudQuota
 }
 
@@ -73,5 +76,12 @@ export type CreateTenantPayload = {
   name: string
   ownerEmail: string
   segment: 'startup' | 'corporate'
+  quota: CloudQuota
+}
+
+export type UpdateTenantPayload = {
+  id: string
+  name: string
+  ownerEmail: string
   quota: CloudQuota
 }

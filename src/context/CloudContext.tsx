@@ -16,6 +16,7 @@ import type {
   InfrastructureNode,
   Tenant,
   TenantUsage,
+  UpdateTenantPayload,
   VirtualMachine,
   VmFlavor,
   VmImage,
@@ -35,6 +36,9 @@ type CloudContextValue = {
   createVm: (payload: CreateVmPayload) => Promise<{ vmId: string }>
   deleteVm: (vmId: string) => void
   createTenant: (payload: CreateTenantPayload) => Promise<{ tenantId: string }>
+  updateTenant: (payload: UpdateTenantPayload) => Promise<void>
+  deleteTenant: (tenantId: string) => Promise<void>
+  toggleTenantStatus: (tenantId: string) => Promise<void>
 }
 
 const CloudContext = createContext<CloudContextValue | null>(null)
@@ -164,11 +168,50 @@ export function CloudProvider({ children }: { children: ReactNode }) {
       name: payload.name,
       ownerEmail: payload.ownerEmail,
       segment: payload.segment === 'startup' ? 'startup' : 'enterprise',
+      status: 'ACTIVE',
       quota: payload.quota,
     }
 
     setTenants((prev) => [nextTenant, ...prev])
     return { tenantId }
+  }, [])
+
+  const updateTenant = useCallback(async (payload: UpdateTenantPayload) => {
+    setTenants((prev) =>
+      prev.map((tenant) =>
+        tenant.id === payload.id
+          ? {
+              ...tenant,
+              name: payload.name,
+              ownerEmail: payload.ownerEmail,
+              quota: payload.quota,
+            }
+          : tenant,
+      ),
+    )
+  }, [])
+
+  const deleteTenant = useCallback(async (tenantId: string) => {
+    setTenants((prev) => {
+      if (prev.length <= 1) {
+        return prev
+      }
+
+      const remaining = prev.filter((tenant) => tenant.id !== tenantId)
+      setActiveTenantId((current) => (current === tenantId ? remaining[0].id : current))
+      return remaining
+    })
+    setVms((prev) => prev.filter((vm) => vm.tenantId !== tenantId))
+  }, [])
+
+  const toggleTenantStatus = useCallback(async (tenantId: string) => {
+    setTenants((prev) =>
+      prev.map((tenant) =>
+        tenant.id === tenantId
+          ? { ...tenant, status: tenant.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE' }
+          : tenant,
+      ),
+    )
   }, [])
 
   const deleteVm = useCallback((vmId: string) => {
@@ -183,7 +226,10 @@ export function CloudProvider({ children }: { children: ReactNode }) {
     [],
   )
 
-  const activeTenant = useMemo(() => tenants.find((item) => item.id === activeTenantId) ?? tenants[0], [activeTenantId, tenants])
+  const activeTenant = useMemo(
+    () => tenants.find((item) => item.id === activeTenantId) ?? tenants[0] ?? initialTenants[0],
+    [activeTenantId, tenants],
+  )
 
   const value = useMemo<CloudContextValue>(
     () => ({
@@ -200,8 +246,24 @@ export function CloudProvider({ children }: { children: ReactNode }) {
       createVm,
       deleteVm,
       createTenant,
+      updateTenant,
+      deleteTenant,
+      toggleTenantStatus,
     }),
-    [activeTenant, activeTenantId, canDeployForTenant, createTenant, createVm, deleteVm, getTenantUsage, tenants, vms],
+    [
+      activeTenant,
+      activeTenantId,
+      canDeployForTenant,
+      createTenant,
+      createVm,
+      deleteTenant,
+      deleteVm,
+      getTenantUsage,
+      tenants,
+      toggleTenantStatus,
+      updateTenant,
+      vms,
+    ],
   )
 
   return <CloudContext.Provider value={value}>{children}</CloudContext.Provider>
