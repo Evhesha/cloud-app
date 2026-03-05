@@ -5,6 +5,7 @@ import { AuthScreen } from './components/screens/AuthScreen'
 import { CreateInstanceModalScreen } from './components/screens/CreateInstanceModalScreen'
 import { CreateTenantModalScreen } from './components/screens/CreateTenantModalScreen'
 import { CustomerDashboardScreen } from './components/screens/CustomerDashboardScreen'
+import { EditTenantModalScreen } from './components/screens/EditTenantModalScreen'
 
 function ProtectedRoute({ allowed }: { allowed: AuthRole[] }) {
   const { user, isAuthenticated } = useAuth()
@@ -35,7 +36,7 @@ function App() {
             <Route element={<ProtectedRoute allowed={['admin']} />}>
               <Route path="/admin-panel" element={<AdminPanelScreen />} />
               <Route path="/create-tenant" element={<CreateTenantModalScreen />} />
-              <Route path="/tenant-management/:tenantId" element={<CreateTenantModalScreen />} />
+              <Route path="/tenant-management/:tenantId" element={<EditTenantModalScreen />} />
             </Route>
 
             <Route path="/" element={<Navigate to="/auth" replace />} />

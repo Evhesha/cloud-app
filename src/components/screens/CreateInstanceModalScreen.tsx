@@ -170,7 +170,7 @@ export function CreateInstanceModalScreen() {
       throw new Error('Invalid flavor or image selection')
     }
 
-    const response = await fetch('http://localhost:3000/virtual-machines', {
+    const response = await fetch('http://localhost:3000/vms', {
       method: 'POST',
       credentials: 'include',
       headers: {
