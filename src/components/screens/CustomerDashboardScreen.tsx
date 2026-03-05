@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { StatusPill } from '../shared/StatusPill'
+import { EmptyStateCard } from '../shared/EmptyStateCard'
 import { useAuth } from '../../context/AuthContext'
 import Cookies from 'js-cookie'
 
@@ -43,7 +44,6 @@ export function CustomerDashboardScreen() {
   const [tenant, setTenant] = useState<Tenant | null>(null)
   const [vms, setVms] = useState<VirtualMachine[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
 
   // Загружаем тенант текущего пользователя
   useEffect(() => {
@@ -64,7 +64,6 @@ export function CustomerDashboardScreen() {
         if (response.status === 404) {
           // У пользователя нет тенанта
           setTenant(null)
-          setError(null)
           return
         }
         
@@ -85,7 +84,6 @@ export function CustomerDashboardScreen() {
 
       } catch (error) {
         console.error('Error fetching tenant:', error)
-        setError('Failed to load tenant data')
       } finally {
         setLoading(false)
       }
@@ -136,14 +134,13 @@ export function CustomerDashboardScreen() {
             </div>
           </header>
 
-          <section className="panel-flat" style={{ textAlign: 'center', padding: '40px' }}>
-            <h3>Tenant wasn't given to you</h3>
-            <p style={{ marginTop: '16px', color: '#666' }}>
-              Please contact your administrator to assign a tenant to your account.
-            </p>
-            <p style={{ marginTop: '8px', color: '#666' }}>
-              Your email: {user?.email}
-            </p>
+          <section className="panel-flat">
+            <EmptyStateCard
+              kicker="Action Required"
+              title="No Tenant Assigned"
+              description="Your account is authenticated, but no tenant is linked yet. Ask your administrator to assign a project."
+              email={user?.email}
+            />
           </section>
         </main>
       </section>

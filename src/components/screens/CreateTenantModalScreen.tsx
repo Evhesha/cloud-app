@@ -19,7 +19,7 @@ export function CreateTenantModalScreen() {
     { id: 3, name: 'professional', cpu_limit: 8, ram_limit: 16384, disk_limit: '200', vm_limit: 10 }
   ])
 
-  const [ownerEmail, setOwnerEmail] = useState('')
+  const [userEmail, setUserEmail] = useState('')
   const [selectedQuotaId, setSelectedQuotaId] = useState<number>(1)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -27,8 +27,8 @@ export function CreateTenantModalScreen() {
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
 
-    if (!ownerEmail.trim()) {
-      setError('Owner Email is required.')
+    if (!userEmail.trim()) {
+      setError('User Email is required.')
       return
     }
 
@@ -38,6 +38,31 @@ export function CreateTenantModalScreen() {
     try {
       const token = Cookies.get('token')
       
+      // Сначала нужно получить ID пользователя по email
+      // Ищем пользователя по email
+      const userResponse = await fetch(`http://localhost:3000/users?email=${encodeURIComponent(userEmail)}`, {
+        method: 'GET',
+        credentials: 'include',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        }
+      })
+
+      if (!userResponse.ok) {
+        throw new Error('User not found')
+      }
+
+      const users = await userResponse.json()
+      
+      // Предполагаем, что API возвращает массив пользователей
+      const user = Array.isArray(users) ? users[0] : users
+      
+      if (!user || !user.id) {
+        throw new Error(`User with email ${userEmail} not found`)
+      }
+
+      // Создаем тенант с привязкой к пользователю
       const response = await fetch('http://localhost:3000/tenants', {
         method: 'POST',
         credentials: 'include',
@@ -46,7 +71,8 @@ export function CreateTenantModalScreen() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          quota_id: selectedQuotaId
+          quota_id: selectedQuotaId,
+          userIds: [user.id] // Передаем массив с ID пользователя
         })
       })
 
@@ -86,12 +112,12 @@ export function CreateTenantModalScreen() {
 
           <div className="form-grid">
             <label>
-              Owner Email
+              User Email
               <input
                 type="email"
-                value={ownerEmail}
-                onChange={(event) => setOwnerEmail(event.target.value)}
-                placeholder="owner@company.com"
+                value={userEmail}
+                onChange={(event) => setUserEmail(event.target.value)}
+                placeholder="user@company.com"
                 required
               />
             </label>

@@ -28,8 +28,6 @@ type CloudContextValue = {
 }
 
 const CloudContext = createContext<CloudContextValue | null>(null)
-const API_BASE_URL = 'http://localhost:3000'
-
 function buildIp() {
   const octet = Math.floor(Math.random() * 180) + 20
   return `10.10.10.${octet}`

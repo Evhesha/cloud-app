@@ -176,24 +176,42 @@ export function AdminPanelScreen() {
   }
 
   const handleDeleteTenant = async (tenantId: number) => {
-    try {
-      const token = Cookies.get('token')
-      const response = await fetch(`http://localhost:3000/tenants/${tenantId}`, {
-        method: 'DELETE',
-        credentials: 'include',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        }
-      })
-      
-      if (response.ok) {
-        setTenants(tenants.filter(t => t.id !== tenantId))
-      }
-    } catch (error) {
-      console.error('Error deleting tenant:', error)
-    }
+  // Запрашиваем подтверждение
+  if (!confirm('Are you sure you want to delete this tenant? This action cannot be undone.')) {
+    return
   }
+
+  try {
+    const token = Cookies.get('token')
+    const response = await fetch(`http://localhost:3000/tenants/${tenantId}`, {
+      method: 'DELETE',
+      credentials: 'include',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      }
+    })
+    
+    if (!response.ok) {
+      const errorData = await response.json()
+      
+      // Обрабатываем специфические ошибки
+      if (response.status === 409) {
+        alert('Cannot delete tenant: it still has virtual machines. Please delete all VMs first.')
+        return
+      }
+      
+      throw new Error(errorData.error || 'Failed to delete tenant')
+    }
+    
+    // Если удаление успешно, обновляем список
+    setTenants(tenants.filter(t => t.id !== tenantId))
+    
+  } catch (error) {
+    console.error('Error deleting tenant:', error)
+    alert(error instanceof Error ? error.message : 'Failed to delete tenant')
+  }
+}
 
   const handleToggleStatus = async (tenantId: number) => {
     try {
@@ -383,13 +401,13 @@ export function AdminPanelScreen() {
                             ⏻
                           </button>
                           <button
-                            type="button"
-                            className="btn-secondary-pill icon-pill"
-                            onClick={() => void handleDeleteTenant(tenant.id)}
-                            title="Delete tenant"
-                          >
-                            🗑
-                          </button>
+  type="button"
+  className="btn-secondary-pill icon-pill"
+  onClick={() => handleDeleteTenant(tenant.id)}
+  title="Delete tenant"
+>
+  🗑
+</button>
                         </div>
                       </td>
                     </tr>
