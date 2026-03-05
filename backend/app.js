@@ -5,6 +5,7 @@ const cors = require('cors');
 const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
 const tenantRoutes = require('./routes/tenantRoutes');
+const networkRoutes = require('./routes/networkRoutes');
 const db = require('./models');
 const bcrypt = require('bcrypt');
 
@@ -30,6 +31,7 @@ app.options('*', cors(corsOptions));
 app.use('/', authRoutes);
 app.use('/', userRoutes);
 app.use('/tenants', tenantRoutes);
+app.use('/networks', networkRoutes);
 
 // Синхронизация БД
 (async () => {
