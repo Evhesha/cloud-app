@@ -1,9 +1,38 @@
 import { NavLink } from 'react-router-dom'
-import { useMemo } from 'react'
+import { useEffect, useState } from 'react'
 import { StatusPill } from '../shared/StatusPill'
-import { useCloud } from '../../context/CloudContext'
 import { useAuth } from '../../context/AuthContext'
-import { tenantByUserEmail } from '../../data/mockCloud'
+import Cookies from 'js-cookie'
+
+type Tenant = {
+  id: number
+  is_active: boolean
+  quota_id: number
+  Quotum: {
+    id: number
+    name: string
+    cpu_limit: number
+    ram_limit: number
+    disk_limit: string
+    vm_limit: number
+  }
+  total_cpu: number
+  total_ram: number
+  total_disk: number
+  total_vms: number
+}
+
+type VirtualMachine = {
+  id: string
+  tenantId: string
+  name: string
+  status: string
+  vcpu: number
+  ramGb: number
+  storageGb: number
+  osImage: string
+  ip: string
+}
 
 function clampPercent(value: number) {
   return Math.max(0, Math.min(100, value))
@@ -11,29 +40,125 @@ function clampPercent(value: number) {
 
 export function CustomerDashboardScreen() {
   const { user, logout } = useAuth()
-  const { tenants, vms, getTenantUsage, deleteVm } = useCloud()
+  const [tenant, setTenant] = useState<Tenant | null>(null)
+  const [vms, setVms] = useState<VirtualMachine[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  const activeTenant = useMemo(() => {
-    const emailKey = user?.email?.toLowerCase() ?? ''
-    const mappedTenantId = tenantByUserEmail[emailKey]
-    const byEmail = tenants.find((tenant) => tenant.id === mappedTenantId)
-    if (byEmail) {
-      return byEmail
+  // Загружаем тенант текущего пользователя
+  useEffect(() => {
+    const fetchMyTenant = async () => {
+      try {
+        setLoading(true)
+        const token = Cookies.get('token')
+        
+        const response = await fetch('http://localhost:3000/tenants/me', {
+          method: 'GET',
+          credentials: 'include',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          }
+        })
+
+        if (response.status === 404) {
+          // У пользователя нет тенанта
+          setTenant(null)
+          setError(null)
+          return
+        }
+        
+        if (!response.ok) {
+          throw new Error(`Failed to fetch tenant: ${response.status}`)
+        }
+
+        const data = await response.json()
+        console.log('Fetched my tenant:', data)
+        setTenant(data)
+
+        // Здесь можно загрузить VM для этого тенанта
+        // const vmsResponse = await fetch(`http://localhost:3000/tenants/${data.id}/vms`, {
+        //   headers: { 'Authorization': `Bearer ${token}` }
+        // })
+        // const vmsData = await vmsResponse.json()
+        // setVms(vmsData)
+
+      } catch (error) {
+        console.error('Error fetching tenant:', error)
+        setError('Failed to load tenant data')
+      } finally {
+        setLoading(false)
+      }
     }
 
-    const numericId = typeof user?.id === 'number' ? user.id : Number(user?.id)
-    if (Number.isFinite(numericId) && tenants.length > 0) {
-      return tenants[(Math.max(1, numericId) - 1) % tenants.length]
+    fetchMyTenant()
+  }, [])
+
+  const handleDeleteVm = async (vmId: string) => {
+    try {
+      const token = Cookies.get('token')
+      await fetch(`http://localhost:3000/vms/${vmId}`, {
+        method: 'DELETE',
+        credentials: 'include',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        }
+      })
+      setVms(vms.filter(vm => vm.id !== vmId))
+    } catch (error) {
+      console.error('Error deleting VM:', error)
     }
+  }
 
-    return tenants[0]
-  }, [tenants, user?.email, user?.id])
+  if (loading) {
+    return (
+      <section className="mts-page">
+        <main className="mts-main">
+          <div style={{ textAlign: 'center', padding: '40px' }}>Loading...</div>
+        </main>
+      </section>
+    )
+  }
 
-  const tenantVms = vms.filter((vm) => vm.tenantId === activeTenant.id)
-  const usage = getTenantUsage(activeTenant.id)
+  if (!tenant) {
+    return (
+      <section className="mts-page">
+        <main className="mts-main">
+          <header className="page-head">
+            <div>
+              <p className="mts-kicker">Customer Dashboard</p>
+              <h2>No Tenant Assigned</h2>
+            </div>
+            <div className="page-actions">
+              <button type="button" className="btn-secondary-pill" onClick={() => void logout()}>
+                Logout
+              </button>
+            </div>
+          </header>
 
-  const vcpuPercent = clampPercent((usage.vcpu / activeTenant.quota.vcpu) * 100)
-  const ramPercent = clampPercent((usage.ramGb / activeTenant.quota.ramGb) * 100)
+          <section className="panel-flat" style={{ textAlign: 'center', padding: '40px' }}>
+            <h3>Tenant wasn't given to you</h3>
+            <p style={{ marginTop: '16px', color: '#666' }}>
+              Please contact your administrator to assign a tenant to your account.
+            </p>
+            <p style={{ marginTop: '8px', color: '#666' }}>
+              Your email: {user?.email}
+            </p>
+          </section>
+        </main>
+      </section>
+    )
+  }
+
+  const usage = {
+    vcpu: tenant.total_cpu || 0,
+    ramGb: tenant.total_ram ? Number(tenant.total_ram) / 1024 : 0,
+    instances: tenant.total_vms || 0,
+  }
+
+  const vcpuPercent = clampPercent((usage.vcpu / tenant.Quotum.cpu_limit) * 100)
+  const ramPercent = clampPercent((usage.ramGb / (Number(tenant.Quotum.ram_limit) / 1024)) * 100)
+  const instancePercent = clampPercent((usage.instances / tenant.Quotum.vm_limit) * 100)
 
   return (
     <section className="mts-page">
@@ -42,7 +167,7 @@ export function CustomerDashboardScreen() {
           <div>
             <p className="mts-kicker">Customer Dashboard</p>
             <h2>Resource Overview</h2>
-            <p>{`Project: ${activeTenant.name}`}</p>
+            <p>{`Project: ${tenant.Quotum.name} (Tenant #${tenant.id})`}</p>
           </div>
           <div className="page-actions">
             <NavLink to="/create-instance" className="btn-primary-pill">
@@ -59,7 +184,7 @@ export function CustomerDashboardScreen() {
             <div className="stat-head">
               <strong>vCPU Allocation</strong>
               <span>
-                {usage.vcpu} / {activeTenant.quota.vcpu}
+                {usage.vcpu} / {tenant.Quotum.cpu_limit}
               </span>
             </div>
             <div className="stat-track">
@@ -71,7 +196,7 @@ export function CustomerDashboardScreen() {
             <div className="stat-head">
               <strong>RAM Allocation</strong>
               <span>
-                {usage.ramGb}GB / {activeTenant.quota.ramGb}GB
+                {usage.ramGb}GB / {Number(tenant.Quotum.ram_limit) / 1024}GB
               </span>
             </div>
             <div className="stat-track">
@@ -83,13 +208,13 @@ export function CustomerDashboardScreen() {
             <div className="stat-head">
               <strong>Instances</strong>
               <span>
-                {usage.instances} / {activeTenant.quota.instances}
+                {usage.instances} / {tenant.Quotum.vm_limit}
               </span>
             </div>
             <div className="stat-track">
               <div
                 className="stat-fill"
-                style={{ width: `${clampPercent((usage.instances / activeTenant.quota.instances) * 100)}%` }}
+                style={{ width: `${instancePercent}%` }}
               />
             </div>
           </article>
@@ -99,7 +224,7 @@ export function CustomerDashboardScreen() {
           <div className="panel-head-inline">
             <div>
               <h3>Instances</h3>
-              <p>Virtual resources inside {activeTenant.name}</p>
+              <p>Virtual resources inside {tenant.Quotum.name}</p>
             </div>
           </div>
 
@@ -116,38 +241,43 @@ export function CustomerDashboardScreen() {
                 </tr>
               </thead>
               <tbody>
-                {tenantVms.map((vm) => (
-                  <tr key={vm.id}>
-                    <td>
-                      <strong>{vm.name}</strong>
-                      <small>{vm.id}</small>
-                    </td>
-                    <td>
-                      <StatusPill status={vm.status} />
-                    </td>
-                    <td>
-                      {vm.vcpu} vCPU / {vm.ramGb}GB
-                    </td>
-                    <td>{vm.osImage}</td>
-                    <td className="mono">{vm.ip}</td>
-                    <td>
-                      <div className="action-group">
-                        <button type="button" aria-label="Start">
-                          ▶
-                        </button>
-                        <button type="button" aria-label="Stop">
-                          ■
-                        </button>
-                        <button type="button" aria-label="Restart">
-                          ↻
-                        </button>
-                        <button type="button" aria-label="Delete" onClick={() => deleteVm(vm.id)} title="Delete">
-                          🗑
-                        </button>
-                      </div>
+                {vms.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} style={{ textAlign: 'center', padding: '20px' }}>
+                      No instances found
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  vms.map((vm) => (
+                    <tr key={vm.id}>
+                      <td>
+                        <strong>{vm.name}</strong>
+                        <small>{vm.id}</small>
+                      </td>
+                      <td>
+                        <StatusPill status={vm.status} />
+                      </td>
+                      <td>
+                        {vm.vcpu} vCPU / {vm.ramGb}GB
+                      </td>
+                      <td>{vm.osImage}</td>
+                      <td className="mono">{vm.ip}</td>
+                      <td>
+                        <div className="action-group">
+                          <button type="button" aria-label="Start">▶</button>
+                          <button type="button" aria-label="Stop">■</button>
+                          <button type="button" aria-label="Restart">↻</button>
+                          <button 
+                            type="button" 
+                            aria-label="Delete" 
+                            onClick={() => handleDeleteVm(vm.id)} 
+                            title="Delete"
+                          >🗑</button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>

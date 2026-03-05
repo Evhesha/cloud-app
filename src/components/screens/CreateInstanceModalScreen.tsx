@@ -1,37 +1,19 @@
 import { useMemo, useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useCloud } from '../../context/CloudContext'
-import { useAuth } from '../../context/AuthContext'
-import { tenantByUserEmail } from '../../data/mockCloud'
 
 export function CreateInstanceModalScreen() {
   const navigate = useNavigate()
-  const { user } = useAuth()
   const {
+    activeTenant,
+    activeTenantId,
+    setActiveTenantId,
     tenants,
     flavors,
     images,
     canDeployForTenant,
     createVm,
   } = useCloud()
-
-  const activeTenant = useMemo(() => {
-    const emailKey = user?.email?.toLowerCase() ?? ''
-    const mappedTenantId = tenantByUserEmail[emailKey]
-    const byEmail = tenants.find((tenant) => tenant.id === mappedTenantId)
-    if (byEmail) {
-      return byEmail
-    }
-
-    const numericId = typeof user?.id === 'number' ? user.id : Number(user?.id)
-    if (Number.isFinite(numericId) && tenants.length > 0) {
-      return tenants[(Math.max(1, numericId) - 1) % tenants.length]
-    }
-
-    return tenants[0]
-  }, [tenants, user?.email, user?.id])
-
-  const activeTenantId = activeTenant.id
 
   const [instanceName, setInstanceName] = useState('')
   const [selectedFlavorId, setSelectedFlavorId] = useState(flavors[0]?.id ?? '')
@@ -86,11 +68,18 @@ export function CreateInstanceModalScreen() {
         </header>
 
         <form className="panel-flat deploy-form" onSubmit={submit}>
-          <p className="project-line">
-            Deploying to Project: <strong>{activeTenant.name}</strong>
-          </p>
+          <div className="form-grid two">
+            <label>
+              Tenant
+              <select value={activeTenantId} onChange={(event) => setActiveTenantId(event.target.value)}>
+                {tenants.map((tenant) => (
+                  <option key={tenant.id} value={tenant.id}>
+                    {tenant.name}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-          <div className="form-grid">
             <label>
               Instance Name
               <input

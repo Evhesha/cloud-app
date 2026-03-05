@@ -1,5 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
-import { createContext, useContext, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import Cookies from 'js-cookie'
+import { jwtDecode } from 'jwt-decode'
 
 export type AuthRole = 'customer' | 'admin'
 
@@ -24,6 +26,7 @@ type RegisterPayload = {
 
 type AuthContextValue = {
   user: AuthUser | null
+  isAuthenticated: boolean
   login: (payload: LoginPayload) => Promise<AuthUser>
   register: (payload: RegisterPayload) => Promise<void>
   logout: () => Promise<void>
@@ -31,11 +34,30 @@ type AuthContextValue = {
 
 const API_BASE_URL = 'http://localhost:3000'
 const STORAGE_KEY = 'mts_cloud_user'
+const TOKEN_KEY = 'token'
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
 function parseRole(roleId: number): AuthRole {
   return roleId === 1 ? 'customer' : 'admin'
+}
+
+function hasValidToken() {
+  const token = Cookies.get(TOKEN_KEY)
+  if (!token) {
+    return false
+  }
+
+  try {
+    const payload = jwtDecode<{ exp?: number }>(token)
+    if (!payload.exp) {
+      return false
+    }
+
+    return payload.exp * 1000 > Date.now()
+  } catch {
+    return false
+  }
 }
 
 function parseStoredUser(raw: string | null): AuthUser | null {
@@ -63,7 +85,15 @@ function parseStoredUser(raw: string | null): AuthUser | null {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<AuthUser | null>(() => parseStoredUser(localStorage.getItem(STORAGE_KEY)))
+  const [user, setUser] = useState<AuthUser | null>(() => {
+    if (!hasValidToken()) {
+      return null
+    }
+
+    return parseStoredUser(localStorage.getItem(STORAGE_KEY))
+  })
+
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => hasValidToken())
 
   const login = async (payload: LoginPayload) => {
     const response = await fetch(`${API_BASE_URL}/login`, {
@@ -95,6 +125,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     setUser(normalized)
+    setIsAuthenticated(true)
     localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized))
     return normalized
   }
@@ -129,10 +160,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     setUser(null)
+    setIsAuthenticated(false)
     localStorage.removeItem(STORAGE_KEY)
   }
 
-  const value = useMemo<AuthContextValue>(() => ({ user, login, register, logout }), [user])
+  useEffect(() => {
+    const syncSession = () => {
+      const valid = hasValidToken()
+      setIsAuthenticated(valid)
+      if (!valid) {
+        setUser(null)
+        localStorage.removeItem(STORAGE_KEY)
+      }
+    }
+
+    syncSession()
+    const intervalId = window.setInterval(syncSession, 15000)
+    return () => window.clearInterval(intervalId)
+  }, [])
+
+  const value = useMemo<AuthContextValue>(
+    () => ({ user, isAuthenticated, login, register, logout }),
+    [isAuthenticated, user],
+  )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

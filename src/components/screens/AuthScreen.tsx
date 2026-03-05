@@ -6,7 +6,7 @@ type AuthMode = 'login' | 'register'
 
 export function AuthScreen() {
   const navigate = useNavigate()
-  const { user, login, register } = useAuth()
+  const { user, isAuthenticated, login, register } = useAuth()
 
   const [mode, setMode] = useState<AuthMode>('login')
   const [name, setName] = useState('')
@@ -17,7 +17,7 @@ export function AuthScreen() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
 
-  if (user) {
+  if (user && isAuthenticated) {
     return <Navigate to={user.role === 'admin' ? '/admin-panel' : '/customer-dashboard'} replace />
   }
 

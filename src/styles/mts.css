@@ -785,6 +785,34 @@ p {
   font-size: 16px;
 }
 
+.toggle-switch {
+  position: relative;
+  width: 50px;
+  height: 30px;
+  border-radius: 999px;
+  border: 1px solid var(--mts-border);
+  background: #e9e9e7;
+  padding: 2px;
+}
+
+.toggle-switch span {
+  display: block;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.14);
+  transition: transform 0.2s ease;
+}
+
+.toggle-switch.on {
+  background: #f3f3f2;
+}
+
+.toggle-switch.on span {
+  transform: translateX(20px);
+}
+
 .tenant-row-disabled {
   opacity: 0.72;
 }

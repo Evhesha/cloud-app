@@ -1,4 +1,4 @@
-import type { InfrastructureNode, Tenant, VirtualMachine, VmFlavor, VmImage } from '../types/cloud'
+import type { InfrastructureNode, VirtualMachine, VmFlavor, VmImage } from '../types/cloud'
 
 export const vmFlavors: VmFlavor[] = [
   { id: 'small', name: 'Small', vcpu: 2, ramGb: 4, storageGb: 80, monthlyPrice: 15 },
@@ -12,32 +12,7 @@ export const vmImages: VmImage[] = [
   { id: 'windows-2022', name: 'Windows Server 2022' },
 ]
 
-export const tenants: Tenant[] = [
-  {
-    id: 'tenant-acme',
-    name: 'Acme Systems',
-    ownerEmail: 'owner@acme.io',
-    segment: 'enterprise',
-    status: 'ACTIVE',
-    quota: { vcpu: 24, ramGb: 64, storageGb: 1200, instances: 10 },
-  },
-  {
-    id: 'tenant-northwind',
-    name: 'Northwind Data',
-    ownerEmail: 'owner@northwind.io',
-    segment: 'mid-market',
-    status: 'ACTIVE',
-    quota: { vcpu: 16, ramGb: 48, storageGb: 900, instances: 8 },
-  },
-  {
-    id: 'tenant-vertex',
-    name: 'Vertex Labs',
-    ownerEmail: 'owner@vertex.io',
-    segment: 'startup',
-    status: 'ACTIVE',
-    quota: { vcpu: 8, ramGb: 24, storageGb: 500, instances: 5 },
-  },
-]
+
 
 export const tenantByUserEmail: Record<string, string> = {
   'owner@acme.io': 'tenant-acme',

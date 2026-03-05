@@ -21,6 +21,17 @@ export type Tenant = {
   segment: 'enterprise' | 'mid-market' | 'startup'
   status: TenantStatus
   quota: CloudQuota
+  is_active: boolean
+  Quotum: {
+    cpu_limit: number
+    ram_limit: number
+    disk_limit: number
+    vm_limit: number
+  }
+  total_cpu: number
+  total_ram: number
+  total_disk: number
+  total_vms: number
 }
 
 export type VirtualMachine = {

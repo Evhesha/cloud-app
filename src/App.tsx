@@ -8,9 +8,9 @@ import { CreateTenantModalScreen } from './components/screens/CreateTenantModalS
 import { CustomerDashboardScreen } from './components/screens/CustomerDashboardScreen'
 
 function ProtectedRoute({ allowed }: { allowed: AuthRole[] }) {
-  const { user } = useAuth()
+  const { user, isAuthenticated } = useAuth()
 
-  if (!user) {
+  if (!user || !isAuthenticated) {
     return <Navigate to="/auth" replace />
   }
 
