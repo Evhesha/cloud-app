@@ -82,30 +82,49 @@ exports.getVMById = async (req, res) => {
 
 // POST /virtual-machines – создание ВМ
 exports.createVM = async (req, res) => {
-  const { name, image, cpu, ram, disk, network_id, port } = req.body;
-  const { tenant_id } = req.user;
+  const { name, image, cpu, ram, disk, network_id, port, tenant_id: requestedTenantId } = req.body;
+  const { tenant_id: userTenantId, role_id } = req.user;
+  const tenant_id = role_id === 2 && requestedTenantId ? Number(requestedTenantId) : userTenantId;
 
-  // Валидация обязательных полей
-  if (!name || !image || !cpu || !ram || !disk) {
+  if (!name || !image || cpu === undefined || ram === undefined || disk === undefined) {
     return res.status(400).json({ error: 'Необходимо указать name, image, cpu, ram, disk' });
   }
   if (!tenant_id) {
     return res.status(400).json({ error: 'У вас нет тенанта. Сначала создайте тенант.' });
   }
 
+  const cpuValue = Number(cpu);
+  const ramValue = Number(ram);
+  const diskValue = Number(disk);
+  const portValue = port === undefined || port === null || port === '' ? null : Number(port);
+
+  if (
+    !Number.isFinite(cpuValue) ||
+    !Number.isFinite(ramValue) ||
+    !Number.isFinite(diskValue) ||
+    cpuValue < 1 ||
+    ramValue < 128 ||
+    diskValue < 1
+  ) {
+    return res.status(400).json({ error: 'Некорректные значения cpu/ram/disk' });
+  }
+  if (portValue !== null && (!Number.isFinite(portValue) || portValue < 1 || portValue > 65535)) {
+    return res.status(400).json({ error: 'Некорректный порт' });
+  }
+
+  let vm = null;
+  let container = null;
+
   try {
-    // Проверка тенанта и квот
     const tenant = await Tenant.findByPk(tenant_id, { include: Quota });
     if (!tenant) return res.status(404).json({ error: 'Тенант не найден' });
     if (!tenant.is_active) return res.status(400).json({ error: 'Тенант деактивирован' });
 
-    // Проверка сети (если указана)
     if (network_id) {
       const network = await Network.findOne({ where: { id: network_id, tenant_id } });
       if (!network) return res.status(404).json({ error: 'Сеть не принадлежит вашему тенанту' });
     }
 
-    // Подсчёт текущего использования ресурсов
     const usage = await VirtualMachine.findOne({
       where: { tenant_id, status: { [Op.not]: 'deleted' } },
       attributes: [
@@ -116,76 +135,104 @@ exports.createVM = async (req, res) => {
       ],
       raw: true
     });
-    const current = usage || { vm_count: 0, total_cpu: 0, total_ram: 0, total_disk: 0 };
 
-    // Проверка лимитов квоты
-    const quota = tenant.Quotum; // или tenant.quota, в зависимости от ассоциации
+    const current = {
+      vm_count: Number(usage?.vm_count) || 0,
+      total_cpu: Number(usage?.total_cpu) || 0,
+      total_ram: Number(usage?.total_ram) || 0,
+      total_disk: Number(usage?.total_disk) || 0,
+    };
+
+    const quota = tenant.Quotum;
     if (!quota) return res.status(404).json({ error: 'Квота тенанта не найдена' });
-    if (current.vm_count + 1 > quota.vm_limit) {
+    if (current.vm_count + 1 > Number(quota.vm_limit)) {
       return res.status(400).json({ error: 'Превышен лимит количества ВМ' });
     }
-    if (current.total_cpu + cpu > quota.cpu_limit) {
+    if (current.total_cpu + cpuValue > Number(quota.cpu_limit)) {
       return res.status(400).json({ error: 'Превышен лимит CPU' });
     }
-    if (current.total_ram + ram > quota.ram_limit) {
+    if (current.total_ram + ramValue > Number(quota.ram_limit)) {
       return res.status(400).json({ error: 'Превышен лимит RAM' });
     }
-    if (current.total_disk + disk > quota.disk_limit) {
+    if (current.total_disk + diskValue > Number(quota.disk_limit)) {
       return res.status(400).json({ error: 'Превышен лимит диска' });
     }
 
-    // --- РЕАЛЬНОЕ СОЗДАНИЕ КОНТЕЙНЕРА ---
-    // Убедимся, что образ есть локально
+    // Сначала резервируем запись в БД, чтобы не потерять ВМ при сбое после создания контейнера.
+    vm = await VirtualMachine.create({
+      tenant_id,
+      network_id: network_id || null,
+      name,
+      image,
+      cpu: cpuValue,
+      ram: ramValue,
+      disk: diskValue,
+      port: portValue,
+      status: 'creating'
+    });
+
     await ensureImage(image);
 
-    // Параметры контейнера
     const containerConfig = {
       Image: image,
       name: `vm_${Date.now()}_${name.replace(/[^a-zA-Z0-9]/g, '_')}`,
       HostConfig: {
-        Memory: ram * 1024 * 1024, // МБ -> байты
-        NanoCPUs: cpu * 1e9,       // CPU в наноядрах
+        Memory: ramValue * 1024 * 1024,
+        NanoCPUs: cpuValue * 1e9,
         PortBindings: {}
       },
       ExposedPorts: {}
     };
 
-    // Проброс порта, если указан
-    if (port) {
-      containerConfig.ExposedPorts[`${port}/tcp`] = {};
-      containerConfig.HostConfig.PortBindings[`${port}/tcp`] = [{ HostPort: port.toString() }];
+    if (portValue) {
+      containerConfig.ExposedPorts[`${portValue}/tcp`] = {};
+      containerConfig.HostConfig.PortBindings[`${portValue}/tcp`] = [{ HostPort: String(portValue) }];
     }
 
-    // Создаём и запускаем контейнер
-    const container = await docker.createContainer(containerConfig);
+    container = await docker.createContainer(containerConfig);
     await container.start();
 
-    // Получаем IP-адрес контейнера
     const ip = await getContainerIp(container);
 
-    // --- ТОЛЬКО ТЕПЕРЬ СОЗДАЁМ ЗАПИСЬ В БД ---
-    const vm = await VirtualMachine.create({
-      tenant_id,
-      network_id: network_id || null,
-      name,
-      image,
-      cpu,
-      ram,
-      disk,
-      port,
+    await vm.update({
       container_id: container.id,
       ip_address: ip,
       status: 'running'
     });
 
-    // Возвращаем успешный ответ
     res.status(201).json({
       message: 'ВМ успешно создана',
       vm
     });
   } catch (err) {
+    if (container) {
+      try {
+        await container.remove({ force: true });
+      } catch (cleanupError) {
+        console.error('Container cleanup error:', cleanupError);
+      }
+    }
+
+    if (vm) {
+      try {
+        await vm.update({
+          container_id: null,
+          ip_address: null,
+          status: 'suspended'
+        });
+      } catch (cleanupError) {
+        console.error('VM fallback status update error:', cleanupError);
+      }
+
+      console.error('Create VM provisioning error:', err);
+      return res.status(202).json({
+        message: 'ВМ создана в БД, но запуск контейнера не удался',
+        warning: err.message,
+        vm
+      });
+    }
+
     console.error('Create VM error:', err);
-    // Здесь НЕ ИСПОЛЬЗУЕМ переменную vm, так как она могла не создаться
     res.status(500).json({ error: `Ошибка создания ВМ: ${err.message}` });
   }
 };
@@ -215,6 +262,7 @@ exports.updateVM = async (req, res) => {
 // DELETE /virtual-machines/:id – удаление ВМ
 exports.deleteVM = async (req, res) => {
   const { id } = req.params;
+  const { remove_image } = req.body || {};
   const { role_id, tenant_id } = req.user;
 
   try {
@@ -234,9 +282,20 @@ exports.deleteVM = async (req, res) => {
       }
     }
 
+    let imageWarning = null;
+    if (remove_image) {
+      try {
+        const image = docker.getImage(vm.image);
+        await image.remove({ force: true });
+      } catch (imageErr) {
+        imageWarning = `Образ ${vm.image} не удалён: ${imageErr.message}`;
+        console.error(`Ошибка удаления образа ${vm.image}:`, imageErr);
+      }
+    }
+
     // Мягкое удаление записи (можно и физическое)
     await vm.update({ status: 'deleted' });
-    res.json({ message: 'ВМ удалена' });
+    res.json({ message: 'ВМ удалена', warning: imageWarning });
   } catch (err) {
     console.error('Delete VM error:', err);
     res.status(500).json({ error: 'Ошибка сервера' });

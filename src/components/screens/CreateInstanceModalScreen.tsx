@@ -20,20 +20,13 @@ type Tenant = {
   total_vms: number
 }
 
-type Flavor = {
-  id: string
-  name: string
-  vcpu: number
-  ramGb: number
-  storageGb: number
-  monthlyPrice: number
-  image: string // Соответствие образу
-}
-
 type Image = {
   id: string
   name: string
   dockerImage: string // Соответствие образу в базе
+  cpu: number
+  ramGb: number
+  storageGb: number
 }
 
 export function CreateInstanceModalScreen() {
@@ -42,23 +35,15 @@ export function CreateInstanceModalScreen() {
   const [selectedTenantId, setSelectedTenantId] = useState<number | ''>('')
   const [loading, setLoading] = useState(true)
 
-  // Моковые данные для flavors и images (можно заменить на API)
-  const [flavors] = useState<Flavor[]>([
-    { id: 'flavor-1', name: 'Small', vcpu: 1, ramGb: 1, storageGb: 10, monthlyPrice: 10, image: 'nginx:alpine' },
-    { id: 'flavor-2', name: 'Medium', vcpu: 2, ramGb: 2, storageGb: 20, monthlyPrice: 20, image: 'nginx:alpine' },
-    { id: 'flavor-3', name: 'Large', vcpu: 4, ramGb: 4, storageGb: 40, monthlyPrice: 40, image: 'nginx:alpine' },
-  ])
-
   const [images] = useState<Image[]>([
-    { id: 'img-1', name: 'Nginx Static', dockerImage: 'flashspys/nginx-static' },
-    { id: 'img-2', name: 'Lighttpd', dockerImage: 'polygnome/lighttpd' },
-    { id: 'img-3', name: 'Nginx Alpine', dockerImage: 'nginx:alpine' },
-    { id: 'img-4', name: 'Apache Alpine', dockerImage: 'httpd:alpine' },
-    { id: 'img-5', name: 'Caddy Alpine', dockerImage: 'caddy:alpine' },
+    { id: 'img-1', name: 'Nginx Static', dockerImage: 'flashspys/nginx-static', cpu: 1, ramGb: 1, storageGb: 10 },
+    { id: 'img-2', name: 'Lighttpd', dockerImage: 'polygnome/lighttpd', cpu: 1, ramGb: 1, storageGb: 10 },
+    { id: 'img-3', name: 'Nginx Alpine', dockerImage: 'nginx:alpine', cpu: 1, ramGb: 1, storageGb: 10 },
+    { id: 'img-4', name: 'Apache Alpine', dockerImage: 'httpd:alpine', cpu: 2, ramGb: 2, storageGb: 20 },
+    { id: 'img-5', name: 'Caddy Alpine', dockerImage: 'caddy:alpine', cpu: 1, ramGb: 1, storageGb: 10 },
   ])
 
   const [instanceName, setInstanceName] = useState('')
-  const [selectedFlavorId, setSelectedFlavorId] = useState(flavors[0]?.id ?? '')
   const [selectedImageId, setSelectedImageId] = useState(images[0]?.id ?? '')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -104,11 +89,6 @@ export function CreateInstanceModalScreen() {
     fetchTenants()
   }, [])
 
-  const selectedFlavor = useMemo(
-    () => flavors.find((flavor) => flavor.id === selectedFlavorId) ?? flavors[0],
-    [flavors, selectedFlavorId],
-  )
-
   const selectedImage = useMemo(
     () => images.find((image) => image.id === selectedImageId) ?? images[0],
     [images, selectedImageId],
@@ -120,23 +100,25 @@ export function CreateInstanceModalScreen() {
   )
 
   // Функция проверки возможности развертывания
-  const canDeployForTenant = (tenantId: number, flavorId: string) => {
+  const canDeployForTenant = (tenantId: number, imageId: string) => {
     const tenant = tenants.find(t => t.id === tenantId)
-    const flavor = flavors.find(f => f.id === flavorId)
+    const image = images.find((item) => item.id === imageId)
     
-    if (!tenant || !flavor) {
-      return { ok: false, reason: 'Invalid tenant or flavor selection.' }
+    if (!tenant || !image) {
+      return { ok: false, reason: 'Invalid tenant or image selection.' }
     }
 
     const currentUsage = {
       vcpu: tenant.total_cpu || 0,
       ram: tenant.total_ram || 0,
+      disk: tenant.total_disk || 0,
       instances: tenant.total_vms || 0
     }
 
     const projected = {
-      vcpu: currentUsage.vcpu + flavor.vcpu,
-      ram: currentUsage.ram + (flavor.ramGb * 1024), // GB to MB
+      vcpu: currentUsage.vcpu + image.cpu,
+      ram: currentUsage.ram + (image.ramGb * 1024), // GB to MB
+      disk: currentUsage.disk + image.storageGb,
       instances: currentUsage.instances + 1
     }
 
@@ -146,6 +128,10 @@ export function CreateInstanceModalScreen() {
 
     if (projected.ram > tenant.Quotum.ram_limit) {
       return { ok: false, reason: 'RAM quota would be exceeded.' }
+    }
+
+    if (projected.disk > Number(tenant.Quotum.disk_limit)) {
+      return { ok: false, reason: 'Storage quota would be exceeded.' }
     }
 
     if (projected.instances > tenant.Quotum.vm_limit) {
@@ -159,15 +145,13 @@ export function CreateInstanceModalScreen() {
   const createVm = async (payload: {
     tenantId: number
     name: string
-    flavorId: string
     imageId: string
   }) => {
     const token = Cookies.get('token')
-    const flavor = flavors.find(f => f.id === payload.flavorId)
     const image = images.find(i => i.id === payload.imageId)
 
-    if (!flavor || !image) {
-      throw new Error('Invalid flavor or image selection')
+    if (!image) {
+      throw new Error('Invalid image selection')
     }
 
     const response = await fetch('http://localhost:3000/vms', {
@@ -180,9 +164,9 @@ export function CreateInstanceModalScreen() {
       body: JSON.stringify({
         name: payload.name,
         image: image.dockerImage,
-        cpu: flavor.vcpu,
-        ram: flavor.ramGb * 1024, // Convert GB to MB
-        disk: flavor.storageGb,
+        cpu: image.cpu,
+        ram: image.ramGb * 1024, // Convert GB to MB
+        disk: image.storageGb,
         tenant_id: payload.tenantId,
         status: 'creating'
       })
@@ -222,12 +206,12 @@ export function CreateInstanceModalScreen() {
     )
   }
 
-  const guard = canDeployForTenant(selectedTenantId as number, selectedFlavorId)
+  const guard = canDeployForTenant(selectedTenantId as number, selectedImageId)
   const deployBlocked = !guard.ok || !instanceName.trim() || submitting
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (deployBlocked || !selectedFlavor || !selectedImageId || !selectedTenantId) {
+    if (deployBlocked || !selectedImage || !selectedTenantId) {
       return
     }
 
@@ -238,8 +222,7 @@ export function CreateInstanceModalScreen() {
       await createVm({
         tenantId: selectedTenantId as number,
         name: instanceName.trim(),
-        flavorId: selectedFlavor.id,
-        imageId: selectedImageId,
+        imageId: selectedImage.id,
       })
 
       navigate('/customer-dashboard')
@@ -302,7 +285,10 @@ export function CreateInstanceModalScreen() {
                   className={`choice-card ${selectedImageId === image.id ? 'active' : ''}`}
                   onClick={() => setSelectedImageId(image.id)}
                 >
-                  {image.name}
+                  <strong>{image.name}</strong>
+                  <span>
+                    {image.cpu} vCPU • {image.ramGb}GB RAM • {image.storageGb}GB Storage
+                  </span>
                 </button>
               ))}
             </div>
@@ -310,7 +296,7 @@ export function CreateInstanceModalScreen() {
           <div className="deploy-footer">
             <p>
               Quota for {selectedTenant.Quotum.name}: {selectedTenant.Quotum.cpu_limit} vCPU, 
-              {Number(selectedTenant.Quotum.ram_limit) / 1024}GB RAM
+              {Number(selectedTenant.Quotum.ram_limit) / 1024}GB RAM, {Number(selectedTenant.Quotum.disk_limit)}GB Storage
             </p>
             {guard.reason && <p className="guard-warning">{guard.reason}</p>}
             {error && <p className="guard-warning">{error}</p>}

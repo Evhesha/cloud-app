@@ -4,6 +4,7 @@ import { StatusPill } from '../shared/StatusPill'
 import { EmptyStateCard } from '../shared/EmptyStateCard'
 import { useAuth } from '../../context/AuthContext'
 import Cookies from 'js-cookie'
+import type { VmStatus } from '../../types/cloud'
 
 type Tenant = {
   id: number
@@ -24,10 +25,10 @@ type Tenant = {
 }
 
 type VirtualMachine = {
-  id: string
-  tenantId: string
+  id: number
+  tenantId: number
   name: string
-  status: string
+  status: VmStatus
   vcpu: number
   ramGb: number
   storageGb: number
@@ -35,8 +36,27 @@ type VirtualMachine = {
   ip: string
 }
 
+type ApiVirtualMachine = {
+  id: number
+  tenant_id: number
+  name: string
+  status: 'creating' | 'running' | 'stopped' | 'suspended' | 'deleted'
+  cpu: number
+  ram: number
+  disk: number
+  image: string
+  ip_address: string | null
+}
+
 function clampPercent(value: number) {
   return Math.max(0, Math.min(100, value))
+}
+
+function mapVmStatus(status: ApiVirtualMachine['status']): VmStatus {
+  if (status === 'running') return 'RUNNING'
+  if (status === 'stopped') return 'STOPPED'
+  if (status === 'creating') return 'PROVISIONING'
+  return 'ERROR'
 }
 
 export function CustomerDashboardScreen() {
@@ -75,12 +95,32 @@ export function CustomerDashboardScreen() {
         console.log('Fetched my tenant:', data)
         setTenant(data)
 
-        // Здесь можно загрузить VM для этого тенанта
-        // const vmsResponse = await fetch(`http://localhost:3000/tenants/${data.id}/vms`, {
-        //   headers: { 'Authorization': `Bearer ${token}` }
-        // })
-        // const vmsData = await vmsResponse.json()
-        // setVms(vmsData)
+        const vmsResponse = await fetch('http://localhost:3000/vms', {
+          method: 'GET',
+          credentials: 'include',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          }
+        })
+
+        if (vmsResponse.ok) {
+          const vmsData: ApiVirtualMachine[] = await vmsResponse.json()
+          const mappedVms: VirtualMachine[] = vmsData
+            .filter((vm) => vm.status !== 'deleted')
+            .map((vm) => ({
+              id: vm.id,
+              tenantId: vm.tenant_id,
+              name: vm.name,
+              status: mapVmStatus(vm.status),
+              vcpu: vm.cpu,
+              ramGb: Number(vm.ram) / 1024,
+              storageGb: Number(vm.disk),
+              osImage: vm.image,
+              ip: vm.ip_address || '-',
+            }))
+          setVms(mappedVms)
+        }
 
       } catch (error) {
         console.error('Error fetching tenant:', error)
@@ -92,19 +132,67 @@ export function CustomerDashboardScreen() {
     fetchMyTenant()
   }, [])
 
-  const handleDeleteVm = async (vmId: string) => {
+  const handleToggleVmPower = async (vm: VirtualMachine) => {
+    const action = vm.status === 'RUNNING' ? 'stop' : 'start'
+
     try {
       const token = Cookies.get('token')
-      await fetch(`http://localhost:3000/vms/${vmId}`, {
+      const response = await fetch(`http://localhost:3000/vms/${vm.id}/${action}`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        }
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || `Failed to ${action} VM`)
+      }
+
+      setVms((prev) =>
+        prev.map((item) =>
+          item.id === vm.id
+            ? { ...item, status: action === 'start' ? 'RUNNING' : 'STOPPED' }
+            : item
+        )
+      )
+    } catch (error) {
+      console.error(`Error trying to ${action} VM:`, error)
+      alert(error instanceof Error ? error.message : `Unable to ${action} instance.`)
+    }
+  }
+
+  const handleDeleteVm = async (vm: VirtualMachine) => {
+    try {
+      const shouldDeleteVm = confirm(`Delete instance "${vm.name}"?`)
+      if (!shouldDeleteVm) {
+        return
+      }
+
+      const shouldDeleteImage = confirm(`Also delete image "${vm.osImage}" from host?`)
+      const token = Cookies.get('token')
+      const response = await fetch(`http://localhost:3000/vms/${vm.id}`, {
         method: 'DELETE',
         credentials: 'include',
         headers: {
           'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
         }
+        ,
+        body: JSON.stringify({ remove_image: shouldDeleteImage })
       })
-      setVms(vms.filter(vm => vm.id !== vmId))
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Failed to delete VM')
+      }
+
+      setVms((prev) => prev.filter((item) => item.id !== vm.id))
     } catch (error) {
       console.error('Error deleting VM:', error)
+      alert(error instanceof Error ? error.message : 'Unable to delete instance.')
     }
   }
 
@@ -261,13 +349,18 @@ export function CustomerDashboardScreen() {
                       <td className="mono">{vm.ip}</td>
                       <td>
                         <div className="action-group">
-                          <button type="button" aria-label="Start">▶</button>
-                          <button type="button" aria-label="Stop">■</button>
-                          <button type="button" aria-label="Restart">↻</button>
+                          <button
+                            type="button"
+                            aria-label={vm.status === 'RUNNING' ? 'Stop' : 'Start'}
+                            onClick={() => void handleToggleVmPower(vm)}
+                            title={vm.status === 'RUNNING' ? 'Stop' : 'Start'}
+                          >
+                            {vm.status === 'RUNNING' ? '■' : '▶'}
+                          </button>
                           <button 
                             type="button" 
                             aria-label="Delete" 
-                            onClick={() => handleDeleteVm(vm.id)} 
+                            onClick={() => void handleDeleteVm(vm)} 
                             title="Delete"
                           >🗑</button>
                         </div>
