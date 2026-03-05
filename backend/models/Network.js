@@ -37,6 +37,13 @@ module.exports = (sequelize) => {
     tableName: 'networks',
     timestamps: false,
     underscored: true,
+    indexes: [
+      {
+        unique: true,
+        fields: ['tenant_id', 'cidr'],
+        name: 'unique_cidr_per_tenant',
+      },
+    ],
   });
 
   // Ассоциации
