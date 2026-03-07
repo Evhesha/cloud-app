@@ -61,7 +61,7 @@ exports.login = async (req, res) => {
     );
 
     const cookieOptions = {
-      // Allow frontend JS to read cookie (requested behavior).
+  
       httpOnly: false,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict',
